@@ -55,7 +55,7 @@
 
 ## まだできないこと・知っておいてほしいこと
 
-- **確認できている範囲**: `auval` と pluginval（strictness 10）は、VST3・AU とも通っています。Cubase と Logic Pro での確認（[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)）はこれからです。
+- **動作を確認した DAW**: Cubase、Fender Studio、Logic Pro。`auval` と pluginval（strictness 10）も、VST3・AU とも通っています。
 - **Windows** には対応していません。
 - **ノートの高さ**で音程やプリセットを変えることはできません。
 - **DAW へ WAV を直接ドラッグ**することはできません。`Export WAV` でファイルに書き出してください。

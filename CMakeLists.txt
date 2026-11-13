@@ -1,11 +1,14 @@
 cmake_minimum_required(VERSION 3.24)
 
-project(FXtend VERSION 0.1.1 LANGUAGES C CXX)
+# Must come before project(): after it, CMake has already fixed the target to
+# the macOS version of the build machine and this line is ignored.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
+
+project(FXtend VERSION 0.1.2 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
-set(CMAKE_OSX_DEPLOYMENT_TARGET "12.0" CACHE STRING "Minimum macOS version")
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 option(FXTEND_BUILD_TESTS "Build the engine test suite" ON)
