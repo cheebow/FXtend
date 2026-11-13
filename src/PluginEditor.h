@@ -31,7 +31,8 @@ private:
 };
 
 class FXtendAudioProcessorEditor final : public juce::AudioProcessorEditor,
-                                          private juce::Timer
+                                          private juce::Timer,
+                                          private juce::FocusChangeListener
 {
 public:
     explicit FXtendAudioProcessorEditor (FXtendAudioProcessor&);
@@ -44,6 +45,11 @@ private:
     using APVTS = juce::AudioProcessorValueTreeState;
 
     void timerCallback() override;
+
+    // Keeps the keyboard with the host: only a text field being typed into
+    // may hold the keyboard focus, so the host's key commands (space bar for
+    // play, and so on) keep working after a control has been clicked.
+    void globalFocusChanged (juce::Component* focusedComponent) override;
 
     void rebuildPresetList();
     void setSaveMode (bool shouldShow);

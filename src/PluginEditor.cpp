@@ -234,6 +234,11 @@ FXtendAudioProcessorEditor::FXtendAudioProcessorEditor (FXtendAudioProcessor& p)
                                                                      &tailBox, &retriggerBox, &messageLabel })
         addAndMakeVisible (component);
 
+    // A click on the background takes the focus away from a text field (and
+    // globalFocusChanged then hands it back to the host).
+    setWantsKeyboardFocus (true);
+    juce::Desktop::getInstance().addFocusChangeListener (this);
+
     rebuildPresetList();
     setSize (editorWidth, editorHeight());
     showPage (mainPage);
@@ -243,8 +248,24 @@ FXtendAudioProcessorEditor::FXtendAudioProcessorEditor (FXtendAudioProcessor& p)
 
 FXtendAudioProcessorEditor::~FXtendAudioProcessorEditor()
 {
+    juce::Desktop::getInstance().removeFocusChangeListener (this);
     stopTimer();
     setLookAndFeel (nullptr);
+}
+
+void FXtendAudioProcessorEditor::globalFocusChanged (juce::Component* focusedComponent)
+{
+    if (focusedComponent == nullptr || (focusedComponent != this && ! isParentOf (focusedComponent)))
+        return;
+
+    // Typing a preset name, a length or a value needs the keyboard.
+    if (dynamic_cast<juce::TextEditor*> (focusedComponent) != nullptr)
+        return;
+
+    // Buttons, sliders and menus would otherwise keep the focus after a click
+    // and swallow keys such as the space bar. With no focused component, keys
+    // pass through to the host.
+    focusedComponent->giveAwayKeyboardFocus();
 }
 
 void FXtendAudioProcessorEditor::showPage (int page)
