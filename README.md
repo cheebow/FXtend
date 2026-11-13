@@ -1,46 +1,27 @@
 # FXtend
 
-MIDI Note On を 1 個置くだけで、DAW のテンポに同期した長さの Impact / Riser / Downlifter / Sweep / Clap / Sub Drop を発音する FX 専用インストゥルメント（VST3 / AU、macOS 12 以降、Apple Silicon / Intel）。
+効果音専用のプラグイン音源です。Impact、Riser、Downlifter、Sweep、Clap、Sub Drop といった、曲の展開をつなぐ音を鳴らします。
 
-- 長さは小節・拍で指定し、ホストの音楽的位置（PPQ）で測る。MIDI ノートの長さには左右されない。
-- 内蔵のシンセ（Noise / Sub / FM / Transient / Clap）だけで鳴る。Factory プリセット 61 種は外部ファイル不要。
-- 自分の WAV / AIFF を 4 つまで重ねられる（Stretch / Resample / Loop / One-shot）。
+長さを「4 小節」のように決めて MIDI ノートを 1 個置けば、曲のテンポに合わせて、狙った位置でぴたりと鳴り終わります。
+
+- **長さは小節と拍で決めます。** ノートを置いた位置から、決めた長さできっちり鳴り終わります。ノートの長さは関係ありません。
+- **サンプルがなくても鳴ります。** 音はすべて内蔵のシンセ（Noise / Sub / FM / Transient / Clap）で作っていて、61 種類の Factory プリセットがすぐに使えます。
+- **手持ちのサンプルも重ねられます。** WAV / AIFF を 4 つまで読み込み、Stretch、Resample、Loop、One-shot から鳴らし方を選べます。
 
 ![FXtend のメイン画面](docs/images/editor.png)
 
-紹介ページ: [`docs/index.html`](docs/index.html)　／　仕様: [`FXtend_SPEC.md`](FXtend_SPEC.md)　／　テスト計画と DAW での確認手順: [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)
+音を聞きたい方、画面をもっと見たい方は [紹介ページ](https://cheebow.github.io/FXtend/)（[English](https://cheebow.github.io/FXtend/en/)）をどうぞ。
 
-## ビルド
+## インストール
 
-必要なもの: Xcode、CMake 3.24 以降。JUCE 9、Rubber Band、Catch2 は構成時に自動取得される。
+[最新のリリース](https://github.com/cheebow/FXtend/releases/latest) からインストーラ（`.pkg`）をダウンロードして開き、画面の案内に沿って進めてください。VST3、Audio Unit、スタンドアロンアプリの中から、入れたいものを選べます。
 
-```sh
-cmake -B build -G Xcode
-cmake --build build --config Release
-ctest --test-dir build -C Release --output-on-failure
-```
-
-ビルドすると `~/Library/Audio/Plug-Ins/VST3` と `~/Library/Audio/Plug-Ins/Components` にプラグインがコピーされる（無効にするには `-DFXTEND_COPY_PLUGIN_AFTER_BUILD=OFF`）。スタンドアロン版は `build/FXtend_artefacts/Release/Standalone/`。
-
-## 配布用インストーラ
-
-```sh
-scripts/package-macos.sh
-```
-
-Apple Silicon と Intel の両対応でビルドし、VST3・AU・スタンドアロン版を入れるインストーラを `build-dist/package/` に作る。インストール先は `/Library/Audio/Plug-Ins/VST3`、`/Library/Audio/Plug-Ins/Components`、`/Applications`。
-
-他の Mac で開けるようにするには署名と公証が必要で、環境変数で指定する（指定しなければ署名なしで作る）。
-
-| 環境変数 | 内容 |
-|---|---|
-| `SIGN_APP` | `Developer ID Application: 名前 (チームID)`。プラグインとアプリの署名 |
-| `SIGN_PKG` | `Developer ID Installer: 名前 (チームID)`。インストーラの署名 |
-| `NOTARY_PROFILE` | `xcrun notarytool store-credentials` で作ったプロファイル名。Apple の公証に出してチケットを付ける |
+- macOS 12 以降
+- Apple Silicon。Intel Mac でも動くように作っていますが、実機ではまだ試せていません。
 
 ### アンインストール
 
-次を削除する（ユーザープリセットとサンプルも消す場合は最後の 1 つも）。
+次のものを削除します。自分で保存したプリセットと読み込んだサンプルも消すなら、最後の 1 つも削除してください。
 
 ```text
 /Library/Audio/Plug-Ins/VST3/FXtend.vst3
@@ -51,61 +32,110 @@ Apple Silicon と Intel の両対応でビルドし、VST3・AU・スタンド�
 
 ## 使い方
 
-1. インストゥルメントトラックに読み込み、プリセットか FX タイプを選ぶ。
-2. `LENGTH` で長さ（例: 4 Bars）を決める。右に小節・四分音符・秒の換算が出る。
-3. 鳴らしたい位置に MIDI ノートを 1 個置く。ノートの高さと長さは音に影響しない（ベロシティは音量）。
-4. `TAIL`: `Strict` は終点で完全に無音、`Natural` はリバーブ／ディレイの余韻だけ残す。
-5. `Advanced` で各レイヤーと Master を細かく編集できる。`Export WAV` で現在のテンポ・長さのままファイルに書き出せる。
+1. インストゥルメントトラックに FXtend を立ち上げて、プリセットか FX タイプを選びます。
+2. `LENGTH` で長さを決めます（たとえば 4 Bars）。それが何拍ぶんで何秒になるかは、すぐ横に表示されます。
+3. 鳴らしたい位置に MIDI ノートを 1 個置きます。ノートの高さや長さは音に関係ありません。音量はベロシティで変わります。
+4. `TAIL` で終わり方を選びます。`Strict` ならすぱっと無音に、`Natural` ならリバーブやディレイの余韻だけが残ります。
+5. もっと作り込みたくなったら `Advanced` を開くと、レイヤーごとの設定と Master を編集できます。`Export WAV` を押せば、いまのテンポと長さのままファイルに書き出せます。
 
-ホストがテンポを報告しないとき（スタンドアロンなど）は `MANUAL BPM` の値を使い、表示が `MANUAL` になる。
+スタンドアロンアプリのように DAW からテンポが届かないときは、`MANUAL BPM` の値で鳴らします。そのあいだ、テンポの表示は `MANUAL` になります。
 
 ## データの保存場所
 
 | 内容 | 場所 |
 |---|---|
-| ユーザープリセット（`.fxpreset`、JSON） | `~/Library/Application Support/FXtend/Presets` |
-| 読み込んだサンプルの管理コピー | `~/Library/Application Support/FXtend/Samples` |
+| 自分で保存したプリセット（`.fxpreset`、中身は JSON） | `~/Library/Application Support/FXtend/Presets` |
+| 読み込んだサンプルのコピー | `~/Library/Application Support/FXtend/Samples` |
 
-サンプルは読み込み時に内容のハッシュ名で管理フォルダへコピーされ、プロジェクトやプリセットにはその参照だけが保存される。元ファイルを移動しても同じ Mac では再生できる。別の Mac へ持っていくときは `File > Export Preset Package...` でプリセットとサンプルを 1 ファイル（`.fxtendpack`）にまとめる。読み込むサンプルの利用権限は各自で確認すること。
+サンプルは、読み込んだときに上のフォルダへコピーされます。プロジェクトやプリセットにはそのコピーへの参照だけが保存されるので、元のファイルを動かしても、同じ Mac なら変わらず鳴ります。
 
-## 構成
+別の Mac に持っていくときは、`File > Export Preset Package...` でプリセットとサンプルをひとつのファイル（`.fxtendpack`）にまとめてください。
 
-```text
-src/engine/   ホスト・UI から独立した発音エンジン
-                TransportClock  ホストの PPQ / BPM / 拍子 → ブロックごとのタイムライン
-                FxVoice         1 回のトリガー。進捗 = (PPQ - 開始PPQ) / 長さ、終点サンプルで終了
-                SynthLayer / SampleLayer / MasterFx / FxTemplates（FX タイプとマクロ）
-                OfflineRenderer / WavExport
-src/dsp/      ノイズ、フィルター、オシレーター、カーブ、タイムストレッチ（Rubber Band）
-src/sample/   サンプルの取り込みと管理コピー
-src/preset/   プリセットの JSON 形式、Factory プリセット、ユーザープリセット、パッケージ
-src/ui/       エディタの部品
-src/          プラグイン層（AudioProcessor / Editor / ホストパラメータ）
-tests/        偽ホストでエンジンとプラグインを駆動する自動テスト
+読み込むサンプルは、利用条件を確かめたうえでお使いください。
+
+## まだできないこと・知っておいてほしいこと
+
+- **確認できている範囲**: `auval` と pluginval（strictness 10）は、VST3・AU とも通っています。Cubase と Logic Pro での確認（[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)）はこれからです。
+- **Windows** には対応していません。
+- **ノートの高さ**で音程やプリセットを変えることはできません。
+- **DAW へ WAV を直接ドラッグ**することはできません。`Export WAV` でファイルに書き出してください。
+- **再生中にテンポが変わったときの Stretch**: テンポが一定のあいだは、音程を保ったまま伸縮した音を鳴らします。途中でテンポが変わると、終わる位置を合わせることを優先して再生速度を変えるので、そのあいだは音程もテンポの変化ぶんだけずれます。
+- **Overlap と Strict を一緒に使うとき**: リバーブとディレイは全体で 1 つなので、最後に鳴っている音が終わる位置でまとめて無音になります。
+- **Custom 4-point カーブ**は、エンジンとプリセットは対応していますが、編集する画面がまだありません。
+
+---
+
+ここから下は、ソースコードを触る方向けです。
+
+## ビルド
+
+Xcode と CMake 3.24 以降が必要です。JUCE 9、Rubber Band、Catch2 は、最初の `cmake` のときに自動でダウンロードされます。
+
+```sh
+cmake -B build -G Xcode
+cmake --build build --config Release
+ctest --test-dir build -C Release --output-on-failure
 ```
 
-レイヤーや Master の設定項目は `src/engine/LayerFields.cpp` の表 1 か所で定義され、ホストパラメータ・プリセット・編集画面がそこから作られる。**表の id と選択肢の順序は保存データの互換性に関わるので、追加は末尾に行い、既存のものは変更しない。**
+ビルドが終わると、プラグインは `~/Library/Audio/Plug-Ins` の `VST3` と `Components` にコピーされます。コピーしたくないときは `-DFXTEND_COPY_PLUGIN_AFTER_BUILD=OFF` を付けてください。スタンドアロンアプリは `build/FXtend_artefacts/Release/Standalone/` にできます。
 
-## 仕様からの変更点・既知の制限
+## インストーラを作る
 
-- **テンポ変化中の Stretch**: 一定テンポでは Rubber Band（R3）で事前レンダーした音を再生する。再生中にテンポが変わった場合や、新しい長さのレンダーが終わるまでの間は、終点の一致を優先して速度可変で再生する（その間は音程がテンポ比だけずれる）。リアルタイムのストレッチ処理は行っていない。
-- Overlap 中に Strict を使うと、Master のリバーブ／ディレイは最後に鳴っている本体の終点で無音になる（Master FX は全ボイス共通のため）。
-- Custom 4-point カーブはエンジンとプリセットが対応しているが、編集画面はまだない。
-- ノート番号による音程・プリセット切り替え、DAW への WAV ドラッグ、Windows は未対応。
-- Intel Mac 用のコードはインストーラに含まれるが（ユニバーサルバイナリ）、Intel Mac の実機では未確認。
-- `auval` と pluginval（strictness 10、VST3 / AU）は通過。Cubase / Logic での実機確認（`docs/TEST_PLAN.md`）はこれから。
+```sh
+scripts/package-macos.sh
+```
+
+Apple Silicon と Intel の両方で動く形でビルドし、VST3、AU、スタンドアロンアプリを入れるインストーラを `build-dist/package/` に作ります。インストール先は `/Library/Audio/Plug-Ins/VST3`、`/Library/Audio/Plug-Ins/Components`、`/Applications` です。
+
+ほかの Mac で開けるようにするには、署名と Apple の公証が必要です。次の環境変数で指定します。指定しなければ、署名なしのインストーラができます。
+
+| 環境変数 | 内容 |
+|---|---|
+| `SIGN_APP` | `Developer ID Application: 名前 (チームID)`。プラグインとアプリの署名に使います |
+| `SIGN_PKG` | `Developer ID Installer: 名前 (チームID)`。インストーラの署名に使います |
+| `NOTARY_PROFILE` | `xcrun notarytool store-credentials` で作ったプロファイルの名前。指定すると Apple の公証に出し、通ったらチケットを付けます |
+
+## ソースコードの構成
+
+```text
+src/engine/   音を鳴らすエンジン。DAW や画面には依存しません
+                TransportClock  DAW から届く位置（PPQ）・BPM・拍子を、処理ブロックごとの時間軸にします
+                FxVoice         1 回ぶんの発音。進み具合 = (PPQ - 開始PPQ) / 長さ。終わる位置のサンプルで止まります
+                SynthLayer / SampleLayer / MasterFx / FxTemplates（FX タイプとノブ）
+                OfflineRenderer / WavExport
+src/dsp/      ノイズ、フィルター、オシレーター、カーブ、タイムストレッチ（Rubber Band）
+src/sample/   サンプルの読み込みと、コピーの管理
+src/preset/   プリセットの JSON 形式、Factory プリセット、自分で保存したプリセット、パッケージ
+src/ui/       画面の部品
+src/          プラグインとしての外側（AudioProcessor / Editor / DAW に見せるパラメータ）
+tests/        DAW の代わりをする仕組みで、エンジンとプラグインを動かす自動テスト
+```
+
+レイヤーと Master の設定項目は、`src/engine/LayerFields.cpp` にある表 1 か所で決めています。DAW に見せるパラメータも、プリセットも、編集画面も、この表から作られます。
+
+**表の id と選択肢の並び順は、保存済みのデータと結びついています。項目を足すときは必ず末尾に足し、すでにあるものは変えないでください。**
+
+仕様は [`FXtend_SPEC.md`](FXtend_SPEC.md)、テストの計画と DAW での確認手順は [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) にあります。仕様と実装が違うところは、上の「まだできないこと・知っておいてほしいこと」にまとめています。
+
+## ロゴとアイコン
+
+`assets/logo/` に入っています。
+
+- **マーク**: 消えていく音と立ち上がる音が向かい合って、X の形になる絵です。
+- **ロゴ**: 暗い背景用と明るい背景用があります。
+- **アプリのアイコン**
+
+元のデータは SVG で、PNG はそこから書き出したものです。ロゴの文字は [Outfit](https://github.com/Outfitio/Outfit-Fonts)（SIL Open Font License 1.1）を図形に変えてあるので、フォントが入っていない環境でも同じ形で表示されます。プラグインの画面左上のロゴも、同じ図形を描いています。
 
 ## ライセンス
 
 Copyright © 2026 CHEEBOW
 
-GNU Affero General Public License v3.0（[`LICENSE`](LICENSE)）。
+FXtend は、GNU Affero General Public License v3.0（[`LICENSE`](LICENSE)）で公開しているフリーソフトウェアです。
 
-- [JUCE](https://juce.com) 9 を AGPLv3 の条件で利用。
-- [Rubber Band Library](https://breakfastquay.com/rubberband/) を GPL（v2 以降）の条件で利用。
+- [JUCE](https://juce.com) 9 を、AGPLv3 の条件で使っています。
+- [Rubber Band Library](https://breakfastquay.com/rubberband/) を、GPL（v2 以降）の条件で使っています。
 
-どちらも構成時に取得され、このリポジトリには含まれない。インストーラに入れる表記は [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md)。製品名「FXtend」について正式な商標調査は行っていない（ウェブ検索で同名の音楽ソフトが見つからないことのみ確認）。
+どちらもビルドのときにダウンロードされるもので、このリポジトリには入っていません。インストーラに入れている表記は [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md) にあります。
 
-## ロゴとアイコン
-
-`assets/logo/` にある。マーク（消えていく音と立ち上がる音が向かい合って X の形になる絵）、ロゴ（暗い背景用・明るい背景用）、アプリのアイコン。SVG が元データで、PNG はそこから書き出したもの。ロゴの文字は [Outfit](https://github.com/Outfitio/Outfit-Fonts)（SIL Open Font License 1.1）を図形に変換したもので、フォントがなくても同じ形で表示される。プラグイン画面左上のロゴも同じ図形を描いている。
+「FXtend」という名前について、正式な商標調査はしていません。ウェブ検索で、同じ名前の音楽ソフトが見つからないことを確かめただけです。
