@@ -66,7 +66,7 @@ DAW を止めたままピアノロールでノートを動かすと、そのた�
 ## まだできないこと・知っておいてほしいこと
 
 - **動作を確認した DAW**: Cubase、Fender Studio、Logic Pro。`auval` と pluginval（strictness 10）も、VST3・AU とも通っています。
-- **Windows** には対応していません。
+- **Windows** にはまだ対応していません。作れる見込みはあり、足りないものは下の「[Windows 版について](#windows-版について)」にまとめています。
 - **ノートの高さ**で音程やプリセットを変えることはできません。
 - **DAW へ WAV を直接ドラッグ**することはできません。`Export WAV` でファイルに書き出してください。
 - **再生中にテンポが変わったときの Stretch**: テンポが一定のあいだは、音程を保ったまま伸縮した音を鳴らします。途中でテンポが変わると、終わる位置を合わせることを優先して再生速度を変えるので、そのあいだは音程もテンポの変化ぶんだけずれます。
@@ -104,6 +104,25 @@ Apple Silicon と Intel の両方で動く形でビルドし、VST3、AU、ス�
 | `SIGN_APP` | `Developer ID Application: 名前 (チームID)`。プラグインとアプリの署名に使います |
 | `SIGN_PKG` | `Developer ID Installer: 名前 (チームID)`。インストーラの署名に使います |
 | `NOTARY_PROFILE` | `xcrun notarytool store-credentials` で作ったプロファイルの名前。指定すると Apple の公証に出し、通ったらチケットを付けます |
+
+## Windows 版について
+
+まだありません。コードはほとんどそのまま Windows でも通る作りですが、実際にビルドして試したことはありません。
+
+そのまま使えるはずのもの:
+
+- JUCE と Rubber Band は Windows に対応しています。VST3 とスタンドアロンアプリは、同じ `CMakeLists.txt` から作れます。AU は Mac だけの形式なので、Windows では自動的に外れます。
+- `src` の中で Mac にしかないコードは、データの保存場所を決める `src/Storage.h` の 1 か所だけで、すでに `#if JUCE_MAC` で分けてあります。
+
+手を入れる必要があるもの:
+
+- **テスト**: `tests/PluginTests.cpp` が CoreFoundation を直接読み込んでいます。ここを分けないと、Windows ではテストがビルドできません。
+- **ビルド**: MSVC で通したことがないので、エラーや警告が出たら直す必要があります。Rubber Band は Mac では Accelerate を使っていますが、Windows では内蔵の FFT に切り替わります。Stretch の音と速さは確かめ直してください。
+- **インストーラ**: `scripts/package-macos.sh` に当たるものがありません。Inno Setup などで作ることになります。
+- **署名**: コード署名の証明書がないと、ダウンロードしたときに SmartScreen の警告が出ます。
+- **DAW での確認**: Windows の実機か仮想マシンで、[`docs/TEST_PLAN.md`](docs/TEST_PLAN.md) の手順をやり直す必要があります。
+
+Windows 機が手元になくても、ビルドと自動テストまでなら GitHub Actions の Windows ランナーで回せます。
 
 ## ソースコードの構成
 
