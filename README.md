@@ -6,7 +6,9 @@ MIDI Note On を 1 個置くだけで、DAW のテンポに同期した長さの
 - 内蔵のシンセ（Noise / Sub / FM / Transient / Clap）だけで鳴る。Factory プリセット 61 種は外部ファイル不要。
 - 自分の WAV / AIFF を 4 つまで重ねられる（Stretch / Resample / Loop / One-shot）。
 
-仕様: [`FXtend_SPEC.md`](FXtend_SPEC.md)　／　テスト計画と DAW での確認手順: [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)
+![FXtend のメイン画面](docs/images/editor.png)
+
+紹介ページ: [`docs/index.html`](docs/index.html)　／　仕様: [`FXtend_SPEC.md`](FXtend_SPEC.md)　／　テスト計画と DAW での確認手順: [`docs/TEST_PLAN.md`](docs/TEST_PLAN.md)
 
 ## ビルド
 
@@ -89,7 +91,8 @@ tests/        偽ホストでエンジンとプラグインを駆動する自動
 - **テンポ変化中の Stretch**: 一定テンポでは Rubber Band（R3）で事前レンダーした音を再生する。再生中にテンポが変わった場合や、新しい長さのレンダーが終わるまでの間は、終点の一致を優先して速度可変で再生する（その間は音程がテンポ比だけずれる）。リアルタイムのストレッチ処理は行っていない。
 - Overlap 中に Strict を使うと、Master のリバーブ／ディレイは最後に鳴っている本体の終点で無音になる（Master FX は全ボイス共通のため）。
 - Custom 4-point カーブはエンジンとプリセットが対応しているが、編集画面はまだない。
-- ノート番号による音程・プリセット切り替え、DAW への WAV ドラッグ、Windows / Intel は未対応。
+- ノート番号による音程・プリセット切り替え、DAW への WAV ドラッグ、Windows は未対応。
+- Intel Mac 用のコードはインストーラに含まれるが（ユニバーサルバイナリ）、Intel Mac の実機では未確認。
 - `auval` と pluginval（strictness 10、VST3 / AU）は通過。Cubase / Logic での実機確認（`docs/TEST_PLAN.md`）はこれから。
 
 ## ライセンス

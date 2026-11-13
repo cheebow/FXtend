@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FXtend — 効果音専用のプラグイン音源</title>
+<meta name="description" content="FXtend は、Impact や Riser などの効果音専用のプラグイン音源（VST3 / AU、macOS）です。MIDI ノートを 1 個置けば、曲のテンポに合わせて小節ぴったりで鳴り終わります。">
+<meta property="og:title" content="FXtend">
+<meta property="og:description" content="効果音専用のプラグイン音源。ノートを 1 個置けば、小節ぴったりで鳴り終わる。">
+<meta property="og:image" content="https://cheebow.github.io/FXtend/images/editor.png">
+<meta property="og:type" content="website">
+<link rel="icon" type="image/svg+xml" href="images/fxtend-mark.svg">
+<style>
+  :root {
+    --bg: #14161b;
+    --panel: #1c1f26;
+    --control: #2a2e38;
+    --outline: #3a3f4b;
+    --text: #e6e9ef;
+    --dim: #a0a7b5;
+    --impact: #ff6b5e;
+    --riser: #ffa53d;
+    --downlifter: #5eb1ff;
+    --sweep: #4fd6c4;
+    --clap: #d78bff;
+    --subdrop: #8ee06b;
+    --brand: linear-gradient(90deg, #ffa53d, #ff6b5e 50%, #5eb1ff);
+  }
+
+  * { box-sizing: border-box; }
+
+  html { scroll-behavior: smooth; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: "Avenir Next", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Yu Gothic", "Noto Sans JP", system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.8;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  a { color: var(--downlifter); text-underline-offset: 3px; }
+  a:hover { color: #8cc8ff; }
+
+  img { max-width: 100%; height: auto; display: block; }
+
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 20px; }
+
+  /* ---- Header ---- */
+  header.top {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 20px 0;
+  }
+  header.top img { height: 40px; width: auto; }
+  header.top nav { display: flex; gap: 20px; font-size: 14px; }
+  header.top nav a { color: var(--dim); text-decoration: none; }
+  header.top nav a:hover { color: var(--text); }
+
+  /* ---- Hero ---- */
+  .hero { padding: 48px 0 24px; text-align: center; }
+  .hero h1 {
+    margin: 0 0 20px;
+    font-size: clamp(28px, 5vw, 46px);
+    line-height: 1.35;
+    font-weight: 700;
+    letter-spacing: 0.01em;
+    text-wrap: balance;
+  }
+  .hero h1 em {
+    font-style: normal;
+    background: var(--brand);
+    -webkit-background-clip: text; background-clip: text;
+    color: transparent;
+  }
+  .hero p.lead { max-width: 680px; margin: 0 auto 28px; color: var(--dim); font-size: 17px; }
+  .badges { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin: 0 0 28px; padding: 0; list-style: none; }
+  .badges li {
+    padding: 2px 12px; border: 1px solid var(--outline); border-radius: 999px;
+    font-size: 13px; color: var(--dim);
+  }
+  .actions { display: flex; flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .button {
+    display: inline-block; padding: 10px 22px; border-radius: 10px;
+    font-weight: 600; font-size: 15px; text-decoration: none;
+    border: 1px solid var(--outline); color: var(--text); background: var(--control);
+  }
+  .button:hover { color: var(--text); border-color: #596072; }
+  .button.primary { background: var(--riser); border-color: var(--riser); color: #1a1205; }
+  .button.primary:hover { background: #ffb65e; color: #1a1205; }
+
+  .shot {
+    margin: 0; border: 1px solid var(--outline); border-radius: 12px; overflow: hidden;
+    background: var(--panel);
+  }
+  .hero .shot { margin-top: 44px; box-shadow: 0 30px 80px rgba(0, 0, 0, 0.55); }
+
+  /* ---- Sections ---- */
+  section { padding: 56px 0 8px; }
+  h2 { margin: 0 0 8px; font-size: 26px; line-height: 1.4; }
+  h2 + p.sub { margin: 0 0 28px; color: var(--dim); }
+  h3 { margin: 0 0 6px; font-size: 17px; }
+
+  .grid { display: grid; gap: 16px; }
+  .grid.three { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .grid.two { grid-template-columns: repeat(2, 1fr); }
+
+  .card {
+    padding: 20px 22px; background: var(--panel); border: 1px solid var(--outline); border-radius: 12px;
+  }
+  .card p { margin: 0; color: var(--dim); font-size: 15px; }
+
+  .type { border-top: 3px solid var(--accent); }
+  .type h3 { color: var(--accent); }
+  .type .knobs { margin-top: 10px; font-size: 13px; color: var(--dim); letter-spacing: 0.02em; }
+  .type { display: flex; flex-direction: column; }
+  .listen { margin-top: auto; padding-top: 16px; }
+  .listen span { display: block; margin-bottom: 6px; font-size: 13px; color: var(--text); }
+  .listen audio { display: block; width: 100%; height: 36px; color-scheme: dark; }
+
+  figure.shot figcaption { padding: 12px 16px 14px; font-size: 14px; color: var(--dim); border-top: 1px solid var(--outline); }
+  figure.shot figcaption strong { color: var(--text); margin-right: 6px; }
+
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: step; display: grid; gap: 12px; }
+  ol.steps li {
+    counter-increment: step; position: relative;
+    padding: 14px 18px 14px 60px; background: var(--panel); border: 1px solid var(--outline); border-radius: 12px;
+  }
+  ol.steps li::before {
+    content: counter(step); position: absolute; left: 18px; top: 14px;
+    width: 28px; height: 28px; border-radius: 50%;
+    display: grid; place-items: center;
+    background: var(--control); color: var(--riser); font-weight: 700; font-size: 14px;
+  }
+
+  code, pre { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13.5px; }
+  code { padding: 1px 6px; background: var(--control); border-radius: 5px; }
+  pre {
+    margin: 0 0 16px; padding: 16px 18px; overflow-x: auto;
+    background: #0f1115; border: 1px solid var(--outline); border-radius: 12px; line-height: 1.7;
+  }
+  pre code { padding: 0; background: none; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 15px; }
+  th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--outline); }
+  th { width: 11em; color: var(--dim); font-weight: 500; white-space: nowrap; }
+  tr:last-child th, tr:last-child td { border-bottom: 0; }
+  .table-card { padding: 6px 8px; }
+
+  ul.plain { margin: 0; padding-left: 1.2em; color: var(--dim); font-size: 15px; }
+  ul.plain li { margin-bottom: 4px; }
+
+  footer { margin-top: 64px; padding: 28px 0 48px; border-top: 1px solid var(--outline); color: var(--dim); font-size: 13px; }
+  footer p { margin: 0 0 6px; }
+
+  @media (max-width: 600px) {
+    header.top nav { display: none; }
+    .grid.two { grid-template-columns: 1fr; }
+    th { width: auto; white-space: normal; }
+    section { padding-top: 44px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <a href="./"><img src="images/fxtend-logo-on-dark.svg" alt="FXtend" width="160" height="40"></a>
+    <nav>
+      <a href="#types">音を聞く</a>
+      <a href="#screens">画面</a>
+      <a href="#usage">使い方</a>
+      <a href="#get">入手</a>
+      <a href="https://github.com/cheebow/FXtend">GitHub</a>
+    </nav>
+  </header>
+
+  <main>
+    <div class="hero">
+      <h1>効果音専用のプラグイン音源。<br><em>Impact も Riser も、ノートひとつで。</em></h1>
+      <p class="lead">FXtend は、曲の展開をつなぐ効果音（Impact、Riser、Downlifter、Sweep、Clap、Sub Drop）を鳴らすためだけに作った VST3 / AU プラグインです。長さを「4 小節」のように決めて MIDI ノートを 1 個置けば、曲のテンポに合わせて、狙った位置でぴたりと鳴り終わります。</p>
+      <ul class="badges">
+        <li>VST3</li>
+        <li>Audio Unit</li>
+        <li>スタンドアロン</li>
+        <li>macOS 12 以降</li>
+        <li>オープンソース（AGPLv3）</li>
+      </ul>
+      <div class="actions">
+        <a class="button primary" href="#types">音を聞いてみる</a>
+        <a class="button" href="https://github.com/cheebow/FXtend/releases/latest">ダウンロード</a>
+      </div>
+      <figure class="shot">
+        <a href="images/editor.png"><img src="images/editor.png" alt="FXtend のメイン画面" width="1880" height="1296"></a>
+      </figure>
+    </div>
+
+    <section id="features">
+      <h2>特長</h2>
+      <p class="sub">曲作りの手を止めずに、効果音をさっと置けます。</p>
+      <div class="grid three">
+        <div class="card">
+          <h3>長さは小節と拍で決める</h3>
+          <p>「4 小節」と決めたら、ノートを置いた位置からきっちり 4 小節で鳴り終わります。ノートを長く伸ばしておく必要はありません。途中でテンポが変わっても、終わる位置はずれません。</p>
+        </div>
+        <div class="card">
+          <h3>サンプルがなくても鳴る</h3>
+          <p>音はすべて内蔵のシンセ（Noise / Sub / FM / Transient / Clap）で作っています。61 種類の Factory プリセットは、追加のファイルなしですぐに使えます。</p>
+        </div>
+        <div class="card">
+          <h3>手持ちのサンプルも重ねられる</h3>
+          <p>WAV / AIFF を 4 つまで読み込めます。音程はそのままに長さだけを合わせる Stretch のほか、Resample、Loop、One-shot から鳴らし方を選べます。</p>
+        </div>
+        <div class="card">
+          <h3>終わり方は 2 通り</h3>
+          <p><code>Strict</code> は、終わりの位置ですぱっと無音になります。<code>Natural</code> は、リバーブやディレイの響きだけを残します。</p>
+        </div>
+        <div class="card">
+          <h3>WAV に書き出せる</h3>
+          <p>いま鳴らしている音を、テンポも長さもそのまま WAV ファイルにできます。オーディオトラックに貼って使いたいときに便利です。</p>
+        </div>
+        <div class="card">
+          <h3>別の Mac に持っていける</h3>
+          <p>プリセットと、そこで使っているサンプルを、ひとつのファイル（<code>.fxtendpack</code>）にまとめられます。</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="types">
+      <h2>6 つの FX タイプ</h2>
+      <p class="sub">タイプごとにノブが 4 つあり、細かい設定を開かなくても音の雰囲気をすぐに変えられます。下の音はどれも Factory プリセットを 128 BPM・2 小節で書き出したものです。</p>
+      <div class="grid three">
+        <div class="card type" style="--accent: var(--impact)">
+          <h3>Impact</h3>
+          <p>ドンと一発鳴らす衝撃音。決めた長さのなかで響きが消えていきます。</p>
+          <p class="knobs">Punch · Sub · Brightness · Tail</p>
+          <div class="listen"><span>Impact 09 Cinematic</span><audio controls preload="none" src="audio/impact-09-cinematic.mp3"></audio></div>
+        </div>
+        <div class="card type" style="--accent: var(--riser)">
+          <h3>Riser</h3>
+          <p>終わりに向かってじわじわ盛り上がり、最後の瞬間にいちばん高まります。</p>
+          <p class="knobs">Rise · Tension · Brightness · Width</p>
+          <div class="listen"><span>Riser 01 Classic Noise</span><audio controls preload="none" src="audio/riser-01-classic-noise.mp3"></audio></div>
+        </div>
+        <div class="card type" style="--accent: var(--downlifter)">
+          <h3>Downlifter</h3>
+          <p>Riser の逆で、終わりに向かって落ちていき、最後に底へ着きます。</p>
+          <p class="knobs">Fall · Depth · Air · Width</p>
+          <div class="listen"><span>Downlifter 01 Classic</span><audio controls preload="none" src="audio/downlifter-01-classic.mp3"></audio></div>
+        </div>
+        <div class="card type" style="--accent: var(--sweep)">
+          <h3>Sweep</h3>
+          <p>フィルターが動いて、ノイズが通り過ぎていくような音。風を切るような Whoosh もここに入っています。</p>
+          <p class="knobs">Direction · Cutoff Range · Noise Color · Width</p>
+          <div class="listen"><span>Whoosh 03 Jet Flyby</span><audio controls preload="none" src="audio/whoosh-03-jet-flyby.mp3"></audio></div>
+        </div>
+        <div class="card type" style="--accent: var(--clap)">
+          <h3>Clap</h3>
+          <p>ノイズを重ねて作るクラップ。長く尾を引く Long Clap もあります。</p>
+          <p class="knobs">Density · Spread · Body · Tail</p>
+          <div class="listen"><span>Long Clap 01 Classic</span><audio controls preload="none" src="audio/long-clap-01-classic.mp3"></audio></div>
+        </div>
+        <div class="card type" style="--accent: var(--subdrop)">
+          <h3>Sub Drop</h3>
+          <p>低音がぐっと沈んでいく音。決めた音程まで下がりきったところで終わります。</p>
+          <p class="knobs">Start Pitch · End Pitch · Weight · Drive</p>
+          <div class="listen"><span>Sub Drop 04 808 Dive</span><audio controls preload="none" src="audio/sub-drop-04-808-dive.mp3"></audio></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screens">
+      <h2>画面</h2>
+      <p class="sub">ウィンドウの大きさはそのままで、中身だけが切り替わります。画像をクリックすると大きく表示します。</p>
+      <div class="grid two">
+        <figure class="shot">
+          <a href="images/editor-presets.png"><img src="images/editor-presets.png" alt="Presets ページ" loading="lazy" width="1880" height="1296"></a>
+          <figcaption><strong>Presets</strong>タイプ別に並んだ Factory プリセット。▶ を押せば、読み込む前に音を確かめられます。</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="images/editor-mixer.png"><img src="images/editor-mixer.png" alt="Mixer ページ" loading="lazy" width="1880" height="1296"></a>
+          <figcaption><strong>Mixer</strong>シンセ 4 つとサンプル 4 つ、それに出力の音量を、ひとつの画面で調整できます。</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="images/editor-advanced.png"><img src="images/editor-advanced.png" alt="Advanced ページ" loading="lazy" width="1880" height="1296"></a>
+          <figcaption><strong>Advanced</strong>音量・ピッチ・フィルターを、どこからどこへ、どんなカーブで動かすか。レイヤーごとに決められます。</figcaption>
+        </figure>
+        <figure class="shot">
+          <a href="images/editor-master.png"><img src="images/editor-master.png" alt="Advanced ページの Master タブ" loading="lazy" width="1880" height="1296"></a>
+          <figcaption><strong>Master</strong>全体にかけるトーン、ディレイ、リバーブ、コンプレッサー、リミッター、ステレオの広がり。</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section id="usage">
+      <h2>使い方</h2>
+      <p class="sub">基本は、プリセットを選んでノートを置くだけです。</p>
+      <ol class="steps">
+        <li>インストゥルメントトラックに FXtend を立ち上げて、プリセットか FX タイプを選びます。</li>
+        <li><code>LENGTH</code> で長さを決めます（たとえば 4 Bars）。それが何拍ぶんで何秒になるかは、すぐ横に表示されます。</li>
+        <li>鳴らしたい位置に MIDI ノートを 1 個置きます。ノートの高さや長さは音に関係ありません。音量はベロシティで変わります。</li>
+        <li><code>TAIL</code> で終わり方を選びます。<code>Strict</code> ならすぱっと無音に、<code>Natural</code> なら余韻が残ります。</li>
+        <li>もっと作り込みたくなったら <code>Advanced</code> を開きます。<code>Export WAV</code> を押せば、そのままファイルに書き出せます。</li>
+      </ol>
+    </section>
+
+    <section id="requirements">
+      <h2>動作環境</h2>
+      <p class="sub">現在のバージョンは 0.1.0 です。</p>
+      <div class="card table-card">
+        <table>
+          <tr><th>OS</th><td>macOS 12 以降</td></tr>
+          <tr><th>CPU</th><td>Apple Silicon。Intel Mac でも動くように作っていますが、実機ではまだ試せていません。</td></tr>
+          <tr><th>形式</th><td>VST3 / Audio Unit / スタンドアロンアプリ</td></tr>
+          <tr><th>入出力</th><td>MIDI 入力、ステレオ出力</td></tr>
+          <tr><th>動作確認</th><td><code>auval</code> と pluginval（strictness 10）は、VST3・AU とも通っています。Cubase と Logic Pro での確認はこれからです。</td></tr>
+          <tr><th>まだできないこと</th><td>Windows での利用、ノートの高さで音程やプリセットを変えること、DAW へ WAV を直接ドラッグすること</td></tr>
+        </table>
+      </div>
+    </section>
+
+    <section id="get">
+      <h2>入手</h2>
+      <p class="sub">インストーラをダウンロードして開き、画面の案内に沿って進めてください。VST3、Audio Unit、スタンドアロンアプリの中から、入れたいものを選べます。</p>
+      <p><a class="button primary" href="https://github.com/cheebow/FXtend/releases/latest">インストーラをダウンロード（macOS）</a></p>
+      <p>ソースコードからビルドすることもできます。Xcode と CMake 3.24 以降が必要です。</p>
+<pre><code>git clone https://github.com/cheebow/FXtend.git
+cd FXtend
+cmake -B build -G Xcode
+cmake --build build --config Release</code></pre>
+      <p>ビルドが終わると、プラグインは <code>~/Library/Audio/Plug-Ins</code> の <code>VST3</code> と <code>Components</code> に入ります。削除の手順などは <a href="https://github.com/cheebow/FXtend#readme">README</a> をご覧ください。</p>
+    </section>
+
+    <section id="license">
+      <h2>ライセンス</h2>
+      <p class="sub">FXtend は、GNU Affero General Public License v3.0（AGPLv3）で公開しているフリーソフトウェアです。</p>
+      <ul class="plain">
+        <li><a href="https://juce.com">JUCE</a> 9（AGPLv3）— プラグインの土台と画面まわり</li>
+        <li><a href="https://breakfastquay.com/rubberband/">Rubber Band Library</a> 4（GPL v2 以降）— 音程を変えずに長さを変える処理</li>
+        <li>ロゴの文字には <a href="https://github.com/Outfitio/Outfit-Fonts">Outfit</a>（SIL Open Font License 1.1）の字形を使っています。</li>
+        <li>ほかの人が作ったオーディオ素材は入っていません。ご自分で読み込むサンプルは、利用条件を確かめたうえでお使いください。</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <p>FXtend — <a href="https://github.com/cheebow/FXtend">github.com/cheebow/FXtend</a></p>
+    <p>VST は Steinberg Media Technologies GmbH の登録商標です。Audio Units は Apple Inc. の商標です。</p>
+  </footer>
+
+</div>
+<script>
+  // 同時に鳴るのはひとつだけ。
+  const players = document.querySelectorAll("audio");
+  players.forEach((player) => player.addEventListener("play", () => {
+    players.forEach((other) => { if (other !== player) other.pause(); });
+  }));
+</script>
+</body>
+</html>
