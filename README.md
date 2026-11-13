@@ -97,6 +97,8 @@ tests/        偽ホストでエンジンとプラグインを駆動する自動
 
 ## ライセンス
 
+Copyright © 2026 CHEEBOW
+
 GNU Affero General Public License v3.0（[`LICENSE`](LICENSE)）。
 
 - [JUCE](https://juce.com) 9 を AGPLv3 の条件で利用。
