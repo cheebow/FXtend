@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- FXtend logo. The mark: a sound dying away meets a sound building up, and together they draw an X. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
+  <defs>
+    <linearGradient id="fx" gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="154" y2="0">
+      <stop offset="0" stop-color="#ffa53d"/><stop offset="0.5" stop-color="#ff6b5e"/><stop offset="1" stop-color="#5eb1ff"/>
+    </linearGradient>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#2b2f3a"/><stop offset="1" stop-color="#15171d"/></linearGradient>
+  </defs>
+  <rect x="100" y="100" width="824" height="824" rx="186" fill="url(#tile)"/>
+  <rect x="104" y="104" width="816" height="816" rx="182" fill="none" stroke="#3a3f4d" stroke-width="8"/>
+  <g transform="translate(240 318) scale(3.532 3.88)" fill="url(#fx)">
+    <rect x="0" y="0" width="10" height="100" rx="5"/>
+    <rect x="18" y="12" width="10" height="76" rx="5"/>
+    <rect x="36" y="24" width="10" height="52" rx="5"/>
+    <rect x="54" y="35" width="10" height="30" rx="5"/>
+    <rect x="72" y="43" width="10" height="14" rx="5"/>
+    <rect x="90" y="35" width="10" height="30" rx="5"/>
+    <rect x="108" y="24" width="10" height="52" rx="5"/>
+    <rect x="126" y="12" width="10" height="76" rx="5"/>
+    <rect x="144" y="0" width="10" height="100" rx="5"/>
+  </g>
+</svg>
