@@ -18,6 +18,14 @@ public:
     {
         const float newLeft = juce::jmax (peakLeft, levelLeft * decay);
         const float newRight = juce::jmax (peakRight, levelRight * decay);
+        // The engine counts clips for as long as the plugin lives; a window
+        // opened later starts from what has already happened.
+        if (! seenFirstUpdate)
+        {
+            acknowledgedClipCount = clipCount;
+            seenFirstUpdate = true;
+        }
+
         const bool newClipped = clipCount != acknowledgedClipCount;
 
         if (std::abs (newLeft - levelLeft) > 1.0e-4f || std::abs (newRight - levelRight) > 1.0e-4f || newClipped != clipped)
@@ -74,6 +82,7 @@ private:
 
     float levelLeft = 0.0f, levelRight = 0.0f;
     bool clipped = false;
+    bool seenFirstUpdate = false;
     int latestClipCount = 0, acknowledgedClipCount = 0;
 };
 

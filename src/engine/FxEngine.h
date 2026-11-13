@@ -18,8 +18,47 @@ struct EngineSettings
     LengthUnit lengthUnit = LengthUnit::bars;
     double lengthValue = 4.0;
     RetriggerMode retrigger = RetriggerMode::restart;
+    StoppedNotes stoppedNotes = StoppedNotes::full;
     double manualBpm = 120.0;
 };
+
+/** MIDI events are read from their raw bytes: building a juce::MidiMessage
+    allocates memory for long messages (SysEx), which the audio thread must not do. */
+inline bool isNoteOn (const juce::MidiMessageMetadata& event) noexcept
+{
+    // A Note On with velocity 0 is a Note Off.
+    return event.numBytes == 3 && (event.data[0] & 0xf0) == 0x90 && event.data[2] > 0;
+}
+
+inline float getNoteVelocity (const juce::MidiMessageMetadata& event) noexcept
+{
+    return (float) event.data[2] / 127.0f;
+}
+
+inline bool isNoteOff (const juce::MidiMessageMetadata& event) noexcept
+{
+    if (event.numBytes != 3)
+        return false;
+
+    const int status = event.data[0] & 0xf0;
+    return status == 0x80 || (status == 0x90 && event.data[2] == 0);
+}
+
+/** Identifies a note by channel and number, to match a Note Off with its Note On. */
+inline int getNoteKey (const juce::MidiMessageMetadata& event) noexcept
+{
+    return (event.data[0] & 0x0f) * 128 + (event.data[1] & 0x7f);
+}
+
+inline bool isAllSoundOff (const juce::MidiMessageMetadata& event) noexcept
+{
+    return event.numBytes == 3 && (event.data[0] & 0xf0) == 0xb0 && event.data[1] == 120;
+}
+
+inline bool isAllNotesOff (const juce::MidiMessageMetadata& event) noexcept
+{
+    return event.numBytes == 3 && (event.data[0] & 0xf0) == 0xb0 && event.data[1] == 123;
+}
 
 /** Read by the UI thread; written by the audio thread. */
 struct EngineStatus
@@ -75,7 +114,8 @@ public:
         call sample layers are silent for the block. */
     void setSampleSources (const SampleSources& sources) noexcept { sampleSources = sources; }
 
-    /** Renders one block. The buffer is overwritten. Note Offs are ignored. */
+    /** Renders one block. The buffer is overwritten. Note Offs are ignored,
+        except for notes played while the host is stopped in Gate mode. */
     void process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer& midi, const TransportState& transport);
 
     /** Thread-safe: plays the current FX at the start of the next block. */
@@ -96,13 +136,26 @@ public:
     static double lengthInQuarterNotes (LengthUnit unit, double value, TimeSignature timeSig) noexcept;
 
 private:
-    void noteOn (int sampleOffset, float velocity, const BlockTiming& timing) noexcept;
+    static constexpr int anyNote = -1, notHeld = -1;
+
+    /** heldNote: the key that ends this voice when it is released, or notHeld. */
+    void noteOn (int sampleOffset, float velocity, const BlockTiming& timing, int heldNote = notHeld) noexcept;
+    void releaseHeldNotes (int noteKey, int sampleOffset) noexcept;
     void killAllVoices() noexcept;
+    void silenceNow() noexcept;
+    void publishStatus (const BlockTiming& timing, int activeVoices, float peakLeft, float peakRight) noexcept;
+    void writeOutput (juce::AudioBuffer<float>& buffer, const float* left, const float* right) const noexcept;
 
     // Enough slots for the audible voices plus ones that are still fading out.
     static constexpr int numVoices = maxOverlapVoices * 2;
 
     std::array<FxVoice, numVoices> voices;
+
+    // Gate mode (host stopped): the key each voice is waiting to be released
+    // by, and whether such a release has ended the sound - its reverb and
+    // delay then end with it instead of ringing on.
+    std::array<int, numVoices> heldNotes;
+    bool endedByRelease = false;
     TransportClock clock;
     EngineSettings settings;
     EngineStatus status;

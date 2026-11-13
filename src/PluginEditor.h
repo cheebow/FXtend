@@ -55,6 +55,7 @@ private:
     void setSaveMode (bool shouldShow);
     void commitSave();
     void showMessage (const juce::String& text, bool isError);
+    void clearMessage();
 
     void rebuildLengthChoices();
     void commitLengthText();
@@ -66,7 +67,9 @@ private:
 
     void showFileMenu();
     void showExportMenu();
+    void chooseWavFile();
     void exportWavTo (const juce::File& target);
+    juce::String defaultExportName (const juce::String& fallback) const;
     void choosePackage (bool isImport);
 
     FXtendAudioProcessor& audioProcessor;
@@ -114,9 +117,9 @@ private:
     fxtend::WavExportOptions exportOptions;
     std::unique_ptr<juce::FileChooser> fileChooser;
     bool exporting = false;
-    juce::Label tailTitle, retriggerTitle, messageLabel;
-    juce::ComboBox tailBox, retriggerBox;
-    std::unique_ptr<APVTS::ComboBoxAttachment> tailAttachment, retriggerAttachment;
+    juce::Label tailTitle, retriggerTitle, stoppedTitle, messageLabel;
+    juce::ComboBox tailBox, retriggerBox, stoppedBox;
+    std::unique_ptr<APVTS::ComboBoxAttachment> tailAttachment, retriggerAttachment, stoppedAttachment;
 
     // Change tracking for the timer
     int shownFxType = -1;

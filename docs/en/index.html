@@ -113,6 +113,7 @@
   section { padding: 56px 0 8px; }
   h2 { margin: 0 0 8px; font-size: 26px; line-height: 1.4; }
   h2 + p.sub { margin: 0 0 28px; color: var(--dim); }
+  p.note { margin: 20px 0 0; color: var(--dim); font-size: 15px; }
   h3 { margin: 0 0 6px; font-size: 17px; }
 
   .grid { display: grid; gap: 16px; }
@@ -317,11 +318,12 @@
         <li>Choose how it ends with <code>TAIL</code>: <code>Strict</code> for a clean cut, <code>Natural</code> to keep the tail.</li>
         <li>Want more control? Open <code>Advanced</code>. <code>Export WAV</code> writes the sound straight to a file.</li>
       </ol>
+      <p class="note">While the DAW is stopped, a note you move in the piano roll plays only as long as it is held, so auditions stay short. Set <code>STOPPED</code> to <code>Full</code> to hear the whole sound, or to <code>Off</code> for silence. Playback is not affected.</p>
     </section>
 
     <section id="requirements">
       <h2>Requirements</h2>
-      <p class="sub">The current version is 0.1.2.</p>
+      <p class="sub">The current version is 0.1.3.</p>
       <div class="card table-card">
         <table>
           <tr><th>OS</th><td>macOS 12 or later</td></tr>

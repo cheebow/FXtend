@@ -1,7 +1,10 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include "Storage.h"
 #include "engine/FxTemplates.h"
 #include "preset/PresetPackage.h"
+
+#include <new>
 
 using namespace fxtend;
 
@@ -40,6 +43,9 @@ namespace
         static const char* const names[] = { "ampPoints", "pitchPoints", "cutoffPoints" };
         return juce::Identifier ("s" + juce::String (layer + 1) + "_" + names[curve]);
     }
+
+    // How long an offline render waits for the stretch renders it needs.
+    constexpr int offlineStretchTimeoutMs = 120000;
 
     bool sameMaterial (const StretchJob& a, const StretchJob& b) noexcept
     {
@@ -139,7 +145,16 @@ private:
                 return generation[(size_t) slot] != startedGeneration;
             };
 
-            auto result = stretchSample (job, [&] { return threadShouldExit() || superseded(); });
+            SampleData::Ptr result;
+
+            try
+            {
+                result = stretchSample (job, [&] { return threadShouldExit() || superseded(); });
+            }
+            catch (const std::bad_alloc&)
+            {
+                // Too big to render: the layer keeps playing at variable speed.
+            }
 
             if (result != nullptr && ! threadShouldExit() && ! superseded())
                 callback (slot, job, std::move (result));
@@ -161,19 +176,23 @@ private:
 
 juce::File FXtendAudioProcessor::getDefaultStorageRoot()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-#if JUCE_MAC
-        .getChildFile ("Application Support")
-#endif
-        .getChildFile ("FXtend");
+    return getAppDataDirectory();
+}
+
+namespace
+{
+    juce::File storageFolder (const juce::File& root, const char* name)
+    {
+        return (root == juce::File() ? getAppDataDirectory() : root).getChildFile (name);
+    }
 }
 
 FXtendAudioProcessor::FXtendAudioProcessor (const juce::File& storageRoot)
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       parameters (*this, nullptr, "FXtend", createParameterLayout()),
       reader (parameters),
-      presetManager ((storageRoot == juce::File() ? getDefaultStorageRoot() : storageRoot).getChildFile ("Presets")),
-      sampleManager ((storageRoot == juce::File() ? getDefaultStorageRoot() : storageRoot).getChildFile ("Samples"))
+      presetManager (storageFolder (storageRoot, "Presets")),
+      sampleManager (storageFolder (storageRoot, "Samples"))
 {
     for (auto& layer : curves)
         layer.fill (defaultCurvePoints);
@@ -197,8 +216,12 @@ FXtendAudioProcessor::~FXtendAudioProcessor()
 
 void FXtendAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
 {
-    engine.setSettings (getCurrentSettings());
-    engine.setPatch (getCurrentPatch());
+    Patch patch;
+    EngineSettings settings;
+    readCurrentSound (patch, settings);
+
+    engine.setSettings (settings);
+    engine.setPatch (patch);
     engine.prepare (sampleRate, samplesPerBlock);
 }
 
@@ -216,7 +239,8 @@ bool FXtendAudioProcessor::isBusesLayoutSupported (const BusesLayout& layouts) c
 double FXtendAudioProcessor::getTailLengthSeconds() const
 {
     // Only a Natural tail rings on after the body; give hosts room to render it.
-    return getCurrentPatch().tailMode == TailMode::natural ? 8.0 : 0.0;
+    // Hosts ask from any thread, so this reads the one parameter and nothing else.
+    return reader.readTailMode() == TailMode::natural ? 8.0 : 0.0;
 }
 
 TransportState FXtendAudioProcessor::readTransport() const
@@ -266,6 +290,15 @@ void FXtendAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
 {
     juce::ScopedNoDenormals noDenormals;
 
+    // Some hosts send empty blocks (to flush parameter changes). There is
+    // nothing to render, and nothing else here may act on one: an audition
+    // would be taken for finished before it had played a sample.
+    if (buffer.getNumSamples() == 0)
+    {
+        midi.clear();
+        return;
+    }
+
     if (curvesChanged.load (std::memory_order_acquire))
     {
         const juce::SpinLock::ScopedTryLockType lock (curveLock);
@@ -280,12 +313,27 @@ void FXtendAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     reader.read (audioPatch, audioSettings);
     copyCurves (audioCurves, audioPatch);
 
+    const auto transport = readTransport();
+    noteTempo (transport, audioSettings);
+
+    // A bounce runs faster than real time and often starts the moment a project
+    // has been opened - before the background stretch renders have caught up
+    // with the project's tempo. Offline there is no hurry, so wait for them:
+    // the file must sound like playback does.
+    const bool offline = isNonRealtime();
+
+    if (offline)
+    {
+        updateStretchRequests();
+        waitForStretches (offlineStretchTimeoutMs);
+    }
+
     // ---- Audition: a preset heard without being loaded ---------------------
     bool endAuditionNow = auditionCancelled.exchange (false, std::memory_order_acquire);
 
     if (auditionActive && ! endAuditionNow)
-        for (const auto metadata : midi)
-            if (metadata.getMessage().isNoteOn())      // a played note always means the real sound
+        for (const auto event : midi)
+            if (isNoteOn (event))                       // a played note always means the real sound
                 endAuditionNow = true;
 
     if (endAuditionNow && auditionActive)
@@ -305,6 +353,7 @@ void FXtendAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
             auditionPatch = pendingAudition;
             auditionRequested.store (false, std::memory_order_release);
             auditionActive = auditionStartsNow = true;
+            auditioning.store (true, std::memory_order_release);    // in case the flag was cleared just before the request
             engine.stopAll();               // handled before the preview, inside process()
             engine.triggerPreview();
         }
@@ -316,13 +365,17 @@ void FXtendAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     {
         // Held for the whole block so the sample audio cannot be released
         // underneath the engine. If a sample is being swapped right now, this
-        // one block plays without the sample layers instead of waiting.
-        const juce::SpinLock::ScopedTryLockType lock (sampleLock);
+        // one block plays without the sample layers instead of waiting -
+        // except offline, where waiting is the right thing to do.
+        const bool haveSamples = offline ? (sampleLock.enter(), true) : sampleLock.tryEnter();
 
-        if (lock.isLocked())
+        if (haveSamples)
             engine.setSampleSources (liveSources);
 
-        engine.process (buffer, midi, readTransport());
+        engine.process (buffer, midi, transport);
+
+        if (haveSamples)
+            sampleLock.exit();
     }
 
     if (auditionActive && ! auditionStartsNow && engine.isSilent())
@@ -334,6 +387,29 @@ void FXtendAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce:
     midi.clear();
 }
 
+void FXtendAudioProcessor::noteTempo (const TransportState& transport, const EngineSettings& settings) noexcept
+{
+    // The same rules as the engine's clock: the host's tempo and time
+    // signature where it reports them, the manual tempo and 4/4 otherwise.
+    const bool fromHost = transport.hasBpm && transport.bpm > 0.0;
+    stretchBpm.store (fromHost ? transport.bpm : juce::jlimit (20.0, 999.0, settings.manualBpm), std::memory_order_relaxed);
+
+    const bool signatureFromHost = transport.hasTimeSig && transport.timeSig.numerator > 0 && transport.timeSig.denominator > 0;
+    const TimeSignature signature = signatureFromHost ? transport.timeSig : TimeSignature {};
+    stretchTimeSigNumerator.store (signature.numerator, std::memory_order_relaxed);
+    stretchTimeSigDenominator.store (signature.denominator, std::memory_order_relaxed);
+}
+
+void FXtendAudioProcessor::processBlockBypassed (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)
+{
+    // Whatever was playing ends here, rather than carrying on from the middle
+    // when the bypass is lifted.
+    endAudition();
+    engine.stopAll();
+    buffer.clear();
+    midi.clear();
+}
+
 juce::AudioProcessorEditor* FXtendAudioProcessor::createEditor()
 {
     return new FXtendAudioProcessorEditor (*this);
@@ -341,12 +417,19 @@ juce::AudioProcessorEditor* FXtendAudioProcessor::createEditor()
 
 //==============================================================================
 
+void FXtendAudioProcessor::readCurrentSound (Patch& patch, EngineSettings& settings) const
+{
+    reader.read (patch, settings);
+
+    const juce::SpinLock::ScopedLockType lock (curveLock);
+    copyCurves (curves, patch);
+}
+
 Patch FXtendAudioProcessor::getCurrentPatch() const
 {
     Patch patch;
     EngineSettings settings;
-    reader.read (patch, settings);
-    copyCurves (curves, patch);
+    readCurrentSound (patch, settings);
     return patch;
 }
 
@@ -354,8 +437,24 @@ EngineSettings FXtendAudioProcessor::getCurrentSettings() const
 {
     Patch patch;
     EngineSettings settings;
-    reader.read (patch, settings);
+    readCurrentSound (patch, settings);
     return settings;
+}
+
+juce::String FXtendAudioProcessor::getCurrentPresetName() const
+{
+    const juce::ScopedLock scoped (nameLock);
+    return currentPresetName;
+}
+
+void FXtendAudioProcessor::setCurrentPresetName (const juce::String& name)
+{
+    {
+        const juce::ScopedLock scoped (nameLock);
+        currentPresetName = name;
+    }
+
+    ++patchRevision;
 }
 
 void FXtendAudioProcessor::setCurves (const Patch& patch)
@@ -382,8 +481,7 @@ RenderRequest FXtendAudioProcessor::makeRenderRequest() const
     const auto& status = engine.getStatus();
 
     RenderRequest request;
-    request.patch = getCurrentPatch();
-    request.settings = getCurrentSettings();
+    readCurrentSound (request.patch, request.settings);
     request.bpm = status.bpm.load();
     request.timeSig = { status.timeSigNumerator.load(), status.timeSigDenominator.load() };
 
@@ -441,7 +539,7 @@ void FXtendAudioProcessor::endAudition() noexcept
         auditionCancelled.store (true, std::memory_order_release);
 }
 
-void FXtendAudioProcessor::restartOrStopForNewSound()
+bool FXtendAudioProcessor::stopForNewSound()
 {
     const auto& status = engine.getStatus();
     const bool wasAuditioning = auditioning.load (std::memory_order_acquire);
@@ -449,27 +547,40 @@ void FXtendAudioProcessor::restartOrStopForNewSound()
     const bool hostRunning = status.hostSynced.load();
 
     endAudition();      // an audition is only stopped, never turned into a preview
-
     engine.stopAll();
 
     // With the host running, a restart would land off the grid: just stop.
-    if (wasSounding && ! hostRunning)
+    return wasSounding && ! hostRunning;
+}
+
+void FXtendAudioProcessor::restartOrStopForNewSound()
+{
+    if (stopForNewSound())
         engine.triggerPreview();
 }
 
 void FXtendAudioProcessor::applyPreset (const PresetData& preset)
 {
-    restartOrStopForNewSound();
+    // The preview of the new sound must not start before its settings and
+    // samples are in place (loading samples can take a moment), or it would
+    // begin with the old samples under the new settings.
+    const bool playAgain = stopForNewSound();
+
     setCurrentPatch (preset.patch);
     restoreSamples (preset.sampleRefs);
-    currentPresetName = preset.name;
     hasUndoPatch = false;
-    ++patchRevision;
+    setCurrentPresetName (preset.name);
+
+    if (playAgain)
+        engine.triggerPreview();
 }
 
 juce::Result FXtendAudioProcessor::exportPresetPackage (const juce::File& target) const
 {
-    auto name = currentPresetName.endsWith ("(init)") ? juce::String() : currentPresetName;
+    auto name = getCurrentPresetName();
+
+    if (name.endsWith ("(init)"))
+        name.clear();
 
     if (name.isEmpty())
         name = target.getFileNameWithoutExtension();
@@ -489,9 +600,16 @@ juce::Result FXtendAudioProcessor::importPresetPackage (const juce::File& packag
 
     preset.name = juce::File::createLegalFileName (preset.name.trim());
 
-    // A factory preset cannot be overwritten, so an import with such a name is kept beside it.
-    if (presetManager.isFactory (presetManager.indexOf (preset.name)))
-        preset.name << " (imported)";
+    // An import never replaces a preset that is already there, factory or the
+    // user's own: it is kept beside it under a name of its own.
+    if (presetManager.indexOf (preset.name) >= 0)
+    {
+        const auto base = preset.name + " (imported";
+        preset.name = base + ")";
+
+        for (int number = 2; presetManager.indexOf (preset.name) >= 0; ++number)
+            preset.name = base + " " + juce::String (number) + ")";
+    }
 
     applyPreset (preset);
 
@@ -515,50 +633,41 @@ juce::Result FXtendAudioProcessor::saveUserPreset (const juce::String& name)
     const auto result = presetManager.saveUser (name, getCurrentPreset (name));
 
     if (result.wasOk())
-    {
-        currentPresetName = name.trim();
-        ++patchRevision;
-    }
+        setCurrentPresetName (name.trim());
 
     return result;
 }
 
 bool FXtendAudioProcessor::isCurrentPresetUserPreset() const
 {
-    const int index = presetManager.indexOf (currentPresetName);
+    const int index = presetManager.indexOf (getCurrentPresetName());
     return index >= 0 && ! presetManager.isFactory (index);
 }
 
 juce::Result FXtendAudioProcessor::renameCurrentPreset (const juce::String& newName)
 {
-    const auto result = presetManager.renameUser (presetManager.indexOf (currentPresetName), newName);
+    const auto result = presetManager.renameUser (presetManager.indexOf (getCurrentPresetName()), newName);
 
     if (result.wasOk())
-    {
-        currentPresetName = newName.trim();
-        ++patchRevision;
-    }
+        setCurrentPresetName (newName.trim());
 
     return result;
 }
 
 juce::Result FXtendAudioProcessor::deleteCurrentPreset()
 {
-    const auto result = presetManager.deleteUser (presetManager.indexOf (currentPresetName));
+    const auto result = presetManager.deleteUser (presetManager.indexOf (getCurrentPresetName()));
 
+    // The sound stays as it is; it just no longer belongs to a saved preset.
     if (result.wasOk())
-    {
-        // The sound stays as it is; it just no longer belongs to a saved preset.
-        currentPresetName = {};
-        ++patchRevision;
-    }
+        setCurrentPresetName ({});
 
     return result;
 }
 
 void FXtendAudioProcessor::selectFxType (FxType type)
 {
-    const auto previous = getCurrentPreset (currentPresetName);
+    const auto previous = getCurrentPreset (getCurrentPresetName());
 
     bool hadSamples = false;
 
@@ -568,11 +677,10 @@ void FXtendAudioProcessor::selectFxType (FxType type)
     Patch patch = makeTemplate (type);
     patch.masterGainDb = previous.patch.masterGainDb;
 
-    restartOrStopForNewSound();
+    const bool playAgain = stopForNewSound();
 
     setCurrentPatch (patch);
     restoreSamples ({});                        // another kind of FX wants other samples
-    currentPresetName = juce::String (getFxTypeName (type)) + " (init)";
 
     // Losing loaded samples to one click must be reversible.
     hasUndoPatch = hadSamples;
@@ -581,7 +689,10 @@ void FXtendAudioProcessor::selectFxType (FxType type)
     if (hadSamples)
         undoPreset = previous;
 
-    ++patchRevision;
+    setCurrentPresetName (juce::String (getFxTypeName (type)) + " (init)");
+
+    if (playAgain)
+        engine.triggerPreview();
 }
 
 void FXtendAudioProcessor::randomise()
@@ -650,9 +761,12 @@ void FXtendAudioProcessor::installSample (int slot, const SampleRef& ref, Sample
         target.stretchedJob = {};
         target.wantedJob = {};
         publishSources();
+
+        // Under the lock, so that a request made for this slot by another
+        // thread at the same moment cannot be undone by this cancel.
+        stretchWorker->cancel (slot);
     }
 
-    stretchWorker->cancel (slot);
     ++sampleRevision;
     updateStretchRequests();
 }
@@ -674,13 +788,24 @@ juce::Result FXtendAudioProcessor::loadSample (int slot, const juce::File& file)
         return juce::Result::fail (error);
 
     installSample (slot, ref, std::move (data), false);
+    notifyHostOfStateChange();
     return juce::Result::ok();
 }
 
 void FXtendAudioProcessor::clearSample (int slot)
 {
     if (juce::isPositiveAndBelow (slot, numSampleLayers))
+    {
         installSample (slot, {}, nullptr, false);
+        notifyHostOfStateChange();
+    }
+}
+
+void FXtendAudioProcessor::notifyHostOfStateChange()
+{
+    // Sample assignments are saved with the project but are not parameters,
+    // so the host would not otherwise know there is something to save.
+    updateHostDisplay (ChangeDetails().withNonParameterStateChanged (true));
 }
 
 void FXtendAudioProcessor::restoreSamples (const std::array<SampleRef, numSampleLayers>& refs)
@@ -762,12 +887,14 @@ SampleData::Ptr FXtendAudioProcessor::getSampleData (int slot) const
 
 void FXtendAudioProcessor::updateStretchRequests()
 {
-    const Patch patch = getCurrentPatch();
-    const EngineSettings settings = getCurrentSettings();
-    const auto& status = engine.getStatus();
+    Patch patch;
+    EngineSettings settings;
+    readCurrentSound (patch, settings);
 
-    const double bpm = juce::jmax (1.0, status.bpm.load());
-    const TimeSignature signature { status.timeSigNumerator.load(), status.timeSigDenominator.load() };
+    // The tempo of the block being processed (see noteTempo), not the engine's
+    // status: that only shows a block once it has been rendered.
+    const double bpm = juce::jmax (1.0, stretchBpm.load());
+    const TimeSignature signature { stretchTimeSigNumerator.load(), stretchTimeSigDenominator.load() };
     const double bodySeconds = FxEngine::lengthInQuarterNotes (settings.lengthUnit, settings.lengthValue, signature) * 60.0 / bpm;
 
     for (int slot = 0; slot < numSampleLayers; ++slot)
@@ -775,14 +902,13 @@ void FXtendAudioProcessor::updateStretchRequests()
         const auto& params = patch.samples[(size_t) slot];
 
         SampleData::Ptr released;
-        bool changed = false, submit = false;
-        StretchJob wanted;
+        bool changed = false;
 
         {
             const juce::ScopedLock scoped (slotMutex);
             auto& target = slots[(size_t) slot];
 
-            wanted = makeStretchJob (target.data, params, bodySeconds);
+            const auto wanted = makeStretchJob (target.data, params, bodySeconds);
 
             if (wanted != target.wantedJob)
             {
@@ -800,19 +926,18 @@ void FXtendAudioProcessor::updateStretchRequests()
                     publishSources();
                 }
 
-                submit = wanted.isValid() && (target.stretched == nullptr || target.stretchedJob != wanted);
+                // Asked for while the lock is held: this runs on more than one
+                // thread (the timer, and whoever restores a project), and the
+                // worker must end up with the job this slot is now waiting for.
+                if (wanted.isValid() && (target.stretched == nullptr || target.stretchedJob != wanted))
+                    stretchWorker->request (slot, wanted);
+                else
+                    stretchWorker->cancel (slot);
             }
         }
 
         if (changed)
-        {
-            if (submit)
-                stretchWorker->request (slot, wanted);
-            else
-                stretchWorker->cancel (slot);
-
             ++sampleRevision;
-        }
     }
 }
 
@@ -865,11 +990,18 @@ void FXtendAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 
     state.removeChild (state.getChildWithName (extraStateId), nullptr);
     juce::ValueTree extra (extraStateId);
-    extra.setProperty (presetNameId, currentPresetName, nullptr);
+    extra.setProperty (presetNameId, getCurrentPresetName(), nullptr);
+
+    CurveSet savedCurves;
+
+    {
+        const juce::SpinLock::ScopedLockType lock (curveLock);
+        savedCurves = curves;
+    }
 
     for (int layer = 0; layer < numSynthLayers; ++layer)
         for (int curve = 0; curve < 3; ++curve)
-            extra.setProperty (curveId (layer, curve), pointsToString (curves[(size_t) layer][(size_t) curve]), nullptr);
+            extra.setProperty (curveId (layer, curve), pointsToString (savedCurves[(size_t) layer][(size_t) curve]), nullptr);
 
     // Samples are saved as references to the managed copies, never as audio.
     const auto refs = getSampleRefs();
@@ -933,12 +1065,11 @@ void FXtendAudioProcessor::setStateInformation (const void* data, int sizeInByte
     }
 
     setCurves (curvePatch);
-    currentPresetName = extra[presetNameId].toString();
     hasUndoPatch = false;
 
     parameters.replaceState (state);
     restoreSamples (refs);
-    ++patchRevision;
+    setCurrentPresetName (extra[presetNameId].toString());
 }
 
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()

@@ -222,17 +222,28 @@ FXtendAudioProcessorEditor::FXtendAudioProcessorEditor (FXtendAudioProcessor& p)
 
     styleCaption (tailTitle, "TAIL");
     styleCaption (retriggerTitle, "RETRIGGER");
+    styleCaption (stoppedTitle, "STOPPED");
     tailBox.addItemList (juce::StringArray::fromTokens (tailModeChoices, "|", ""), 1);
     retriggerBox.addItemList (juce::StringArray::fromTokens (retriggerChoices, "|", ""), 1);
+    stoppedBox.addItemList (juce::StringArray::fromTokens (stoppedNotesChoices, "|", ""), 1);
     tailAttachment = std::make_unique<APVTS::ComboBoxAttachment> (state, ParamIDs::tailMode, tailBox);
     retriggerAttachment = std::make_unique<APVTS::ComboBoxAttachment> (state, ParamIDs::retrigger, retriggerBox);
+    stoppedAttachment = std::make_unique<APVTS::ComboBoxAttachment> (state, ParamIDs::stoppedNotes, stoppedBox);
+
+    const juce::String stoppedTip = "What a MIDI note does while the host is stopped (for example when you move a note in the piano roll). "
+                                    "Full: plays the whole FX. Gate: plays only while the key is held. Off: stays silent. "
+                                    "During playback a note always plays its full length.";
+    stoppedTitle.setTooltip (stoppedTip);
+    stoppedBox.setTooltip (stoppedTip);
 
     messageLabel.setFont (fxui::font (12.5f));
     messageLabel.setJustificationType (juce::Justification::centredLeft);
 
-    for (auto* component : std::initializer_list<juce::Component*> { &previewButton, &tailTitle, &retriggerTitle,
-                                                                     &tailBox, &retriggerBox, &messageLabel })
+    for (auto* component : std::initializer_list<juce::Component*> { &previewButton, &tailTitle, &retriggerTitle, &stoppedTitle,
+                                                                     &tailBox, &retriggerBox, &stoppedBox })
         addAndMakeVisible (component);
+
+    addChildComponent (messageLabel);       // shown in place of the footer settings while there is something to say
 
     // A click on the background takes the focus away from a text field (and
     // globalFocusChanged then hands it back to the host).
@@ -249,6 +260,7 @@ FXtendAudioProcessorEditor::FXtendAudioProcessorEditor (FXtendAudioProcessor& p)
 FXtendAudioProcessorEditor::~FXtendAudioProcessorEditor()
 {
     juce::Desktop::getInstance().removeFocusChangeListener (this);
+    juce::PopupMenu::dismissAllActiveMenus();       // they are drawn with this editor's look
     stopTimer();
     setLookAndFeel (nullptr);
 }
@@ -337,7 +349,10 @@ void FXtendAudioProcessorEditor::setSaveMode (bool shouldShow)
     cancelSaveButton.setVisible (saveMode);
 
     if (! saveMode)
+    {
         renameMode = false;
+        rebuildPresetList();        // the sound may have changed while the name field was open
+    }
 
     if (saveMode)
     {
@@ -373,6 +388,22 @@ void FXtendAudioProcessorEditor::showMessage (const juce::String& text, bool isE
     messageLabel.setColour (juce::Label::textColourId, isError ? fxui::Colours::danger : fxui::Colours::text);
     messageLabel.setText (text, juce::dontSendNotification);
     messageTicks = 30 * 6;
+
+    // The message takes the place of the settings next to TAIL for a few seconds.
+    for (auto* component : std::initializer_list<juce::Component*> { &retriggerTitle, &retriggerBox, &stoppedTitle, &stoppedBox })
+        component->setVisible (false);
+
+    messageLabel.setVisible (true);
+}
+
+void FXtendAudioProcessorEditor::clearMessage()
+{
+    messageTicks = 0;
+    messageLabel.setText ({}, juce::dontSendNotification);
+    messageLabel.setVisible (false);
+
+    for (auto* component : std::initializer_list<juce::Component*> { &retriggerTitle, &retriggerBox, &stoppedTitle, &stoppedBox })
+        component->setVisible (true);
 }
 
 //==============================================================================
@@ -547,36 +578,49 @@ void FXtendAudioProcessorEditor::timerCallback()
     meter.update (status.peakLeft.load(), status.peakRight.load(), status.clipCount.load());
 
     if (messageTicks > 0 && --messageTicks == 0)
-        messageLabel.setText ({}, juce::dontSendNotification);
+        clearMessage();
 }
 
 //==============================================================================
 
 void FXtendAudioProcessorEditor::showFileMenu()
 {
+    // Menu actions run after the menu has closed; the host may have closed the
+    // window in between, so they go through a pointer that knows.
+    const auto safeThis = juce::Component::SafePointer<FXtendAudioProcessorEditor> (this);
+    const auto whenAlive = [safeThis] (std::function<void (FXtendAudioProcessorEditor&)> action)
+    {
+        return [safeThis, action = std::move (action)] { if (safeThis != nullptr) action (*safeThis); };
+    };
+
     juce::PopupMenu menu;
-    menu.addItem ("Export Preset Package...", [this] { choosePackage (false); });
-    menu.addItem ("Import Preset Package...", [this] { choosePackage (true); });
+    menu.addItem ("Export Preset Package...", whenAlive ([] (auto& editor) { editor.choosePackage (false); }));
+    menu.addItem ("Import Preset Package...", whenAlive ([] (auto& editor) { editor.choosePackage (true); }));
     menu.addSeparator();
 
     const bool isUserPreset = audioProcessor.isCurrentPresetUserPreset();
-    menu.addItem ("Rename Preset...", isUserPreset, false, [this] { renameMode = true; setSaveMode (true); });
-    menu.addItem ("Delete Preset", isUserPreset, false, [this]
+    menu.addItem ("Rename Preset...", isUserPreset, false, whenAlive ([] (auto& editor)
     {
-        const auto name = audioProcessor.getCurrentPresetName();
-        const auto result = audioProcessor.deleteCurrentPreset();
-        rebuildPresetList();
-        showMessage (result.wasOk() ? "Moved \"" + name + "\" to the Trash" : result.getErrorMessage(), result.failed());
-    });
+        editor.renameMode = true;
+        editor.setSaveMode (true);
+    }));
+    menu.addItem ("Delete Preset", isUserPreset, false, whenAlive ([] (auto& editor)
+    {
+        const auto name = editor.audioProcessor.getCurrentPresetName();
+        const auto result = editor.audioProcessor.deleteCurrentPreset();
+        editor.rebuildPresetList();
+        editor.showMessage (result.wasOk() ? "Moved \"" + name + "\" to the Trash" : result.getErrorMessage(), result.failed());
+    }));
 
     menu.addSeparator();
-    menu.addItem ("Show Preset Folder", [this]
+    menu.addItem ("Show Preset Folder", whenAlive ([] (auto& editor)
     {
-        const auto folder = audioProcessor.getPresetManager().getUserDirectory();
+        const auto folder = editor.audioProcessor.getPresetManager().getUserDirectory();
         folder.createDirectory();
         folder.revealToUser();
-    });
+    }));
 
+    menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (fileButton));
 }
 
@@ -605,10 +649,7 @@ void FXtendAudioProcessorEditor::choosePackage (bool isImport)
         return;
     }
 
-    auto name = audioProcessor.getCurrentPresetName().upToFirstOccurrenceOf (" (init)", false, false);
-
-    if (name.isEmpty())
-        name = "FXtend Preset";
+    const auto name = defaultExportName ("FXtend Preset");
 
     fileChooser = std::make_unique<juce::FileChooser> ("Export a preset package",
                                                        juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
@@ -635,50 +676,74 @@ void FXtendAudioProcessorEditor::showExportMenu()
     if (exporting)
         return;
 
+    const auto safeThis = juce::Component::SafePointer<FXtendAudioProcessorEditor> (this);
+
+    // Choosing an option changes it and shows the menu again.
+    const auto option = [safeThis] (std::function<void (fxtend::WavExportOptions&)> change)
+    {
+        return [safeThis, change = std::move (change)]
+        {
+            if (safeThis != nullptr)
+            {
+                change (safeThis->exportOptions);
+                safeThis->showExportMenu();
+            }
+        };
+    };
+
     juce::PopupMenu menu;
     menu.addSectionHeader ("Sample rate");
 
     for (const double rate : { 44100.0, 48000.0, 96000.0 })
         menu.addItem (juce::String (rate / 1000.0, 1) + " kHz", true, juce::exactlyEqual (exportOptions.sampleRate, rate),
-                      [this, rate] { exportOptions.sampleRate = rate; showExportMenu(); });
+                      option ([rate] (auto& options) { options.sampleRate = rate; }));
 
     menu.addSectionHeader ("Format");
-    menu.addItem ("24-bit PCM", true, ! exportOptions.floatingPoint, [this] { exportOptions.floatingPoint = false; showExportMenu(); });
-    menu.addItem ("32-bit float", true, exportOptions.floatingPoint, [this] { exportOptions.floatingPoint = true; showExportMenu(); });
+    menu.addItem ("24-bit PCM", true, ! exportOptions.floatingPoint, option ([] (auto& options) { options.floatingPoint = false; }));
+    menu.addItem ("32-bit float", true, exportOptions.floatingPoint, option ([] (auto& options) { options.floatingPoint = true; }));
 
     menu.addSectionHeader ("Velocity");
 
     for (const int velocity : { 64, 100, 127 })
         menu.addItem (juce::String (velocity), true, exportOptions.velocity == velocity,
-                      [this, velocity] { exportOptions.velocity = velocity; showExportMenu(); });
+                      option ([velocity] (auto& options) { options.velocity = velocity; }));
 
     menu.addSeparator();
-    menu.addItem ("Save WAV...", [this]
+    menu.addItem ("Save WAV...", [safeThis]
     {
-        auto name = audioProcessor.getCurrentPresetName().upToFirstOccurrenceOf (" (init)", false, false);
-
-        if (name.isEmpty())
-            name = "FXtend";
-
-        const auto& status = audioProcessor.getEngine().getStatus();
-        name << " " << juce::String (status.bpm.load(), 0) << "bpm";
-
-        fileChooser = std::make_unique<juce::FileChooser> ("Export WAV",
-                                                           juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
-                                                               .getChildFile (juce::File::createLegalFileName (name) + ".wav"),
-                                                           "*.wav");
-        fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
-                                      | juce::FileBrowserComponent::warnAboutOverwriting,
-                                  [safeThis = juce::Component::SafePointer<FXtendAudioProcessorEditor> (this)] (const juce::FileChooser& chooser)
-                                  {
-                                      const auto file = chooser.getResult();
-
-                                      if (safeThis != nullptr && file != juce::File())
-                                          safeThis->exportWavTo (file.withFileExtension ("wav"));
-                                  });
+        if (safeThis != nullptr)
+            safeThis->chooseWavFile();
     });
 
+    menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (exportButton));
+}
+
+void FXtendAudioProcessorEditor::chooseWavFile()
+{
+    const auto& status = audioProcessor.getEngine().getStatus();
+    const auto name = defaultExportName ("FXtend") + " " + juce::String (status.bpm.load(), 0) + "bpm";
+
+    fileChooser = std::make_unique<juce::FileChooser> ("Export WAV",
+                                                       juce::File::getSpecialLocation (juce::File::userDesktopDirectory)
+                                                           .getChildFile (juce::File::createLegalFileName (name) + ".wav"),
+                                                       "*.wav");
+    fileChooser->launchAsync (juce::FileBrowserComponent::saveMode | juce::FileBrowserComponent::canSelectFiles
+                                  | juce::FileBrowserComponent::warnAboutOverwriting,
+                              [safeThis = juce::Component::SafePointer<FXtendAudioProcessorEditor> (this)] (const juce::FileChooser& chooser)
+                              {
+                                  const auto file = chooser.getResult();
+
+                                  if (safeThis != nullptr && file != juce::File())
+                                      safeThis->exportWavTo (file.withFileExtension ("wav"));
+                              });
+}
+
+juce::String FXtendAudioProcessorEditor::defaultExportName (const juce::String& fallback) const
+{
+    // "Riser (init)" is a starting point, not a name the user chose.
+    const auto name = audioProcessor.getCurrentPresetName().upToFirstOccurrenceOf (" (init)", false, false);
+    return name.isEmpty() ? fallback : name;
 }
 
 void FXtendAudioProcessorEditor::exportWavTo (const juce::File& target)
@@ -819,13 +884,18 @@ void FXtendAudioProcessorEditor::resized()
     tailTitle.setBounds (footer.removeFromLeft (50));
     footer.removeFromLeft (6);
     tailBox.setBounds (footer.removeFromLeft (100));
-    retriggerTitle.setBounds (footer.removeFromLeft (90));
-    footer.removeFromLeft (6);
-    retriggerBox.setBounds (footer.removeFromLeft (100));
     previewButton.setBounds (footer.removeFromRight (100));
     footer.removeFromRight (6);
     exportButton.setBounds (footer.removeFromRight (110));
-    footer.removeFromLeft (14);
     footer.removeFromRight (10);
-    messageLabel.setBounds (footer);
+
+    // Messages appear over the settings to the right of TAIL (see showMessage).
+    messageLabel.setBounds (footer.withTrimmedLeft (14));
+
+    retriggerTitle.setBounds (footer.removeFromLeft (90));
+    footer.removeFromLeft (6);
+    retriggerBox.setBounds (footer.removeFromLeft (100));
+    stoppedTitle.setBounds (footer.removeFromLeft (80));
+    footer.removeFromLeft (6);
+    stoppedBox.setBounds (footer.removeFromLeft (84));
 }

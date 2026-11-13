@@ -1,4 +1,5 @@
 #include "SampleManager.h"
+#include "../Storage.h"
 
 #include <juce_cryptography/juce_cryptography.h>
 
@@ -15,17 +16,23 @@ SampleManager::SampleManager (const juce::File& directoryToUse) : directory (dir
 
 juce::File SampleManager::getDefaultDirectory()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-#if JUCE_MAC
-        .getChildFile ("Application Support")
-#endif
-        .getChildFile ("FXtend")
-        .getChildFile ("Samples");
+    return getAppDataDirectory().getChildFile ("Samples");
 }
 
 bool SampleManager::hasSupportedExtension (const juce::File& file)
 {
-    return file.hasFileExtension ("wav;wave;aif;aiff");
+    return file.hasFileExtension ("wav;aif;aiff");
+}
+
+namespace
+{
+    // The sample rate comes from the file header. Outside this range it is
+    // either damaged or made to make "60 seconds" mean gigabytes of memory.
+    bool isReadable (const juce::AudioFormatReader* reader) noexcept
+    {
+        return reader != nullptr && reader->lengthInSamples > 0
+               && reader->sampleRate >= 4000.0 && reader->sampleRate <= 768000.0;
+    }
 }
 
 juce::String SampleManager::hashFile (const juce::File& file)
@@ -44,7 +51,7 @@ juce::Result SampleManager::importFile (const juce::File& source, SampleRef& ref
     {
         const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (source));
 
-        if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+        if (! isReadable (reader.get()))
             return juce::Result::fail ("\"" + source.getFileName() + "\" could not be read as an audio file.");
 
         const double seconds = (double) reader->lengthInSamples / reader->sampleRate;
@@ -123,7 +130,7 @@ SampleData::Ptr SampleManager::loadFile (const juce::File& file, juce::String& e
 {
     const std::unique_ptr<juce::AudioFormatReader> reader (formats.createReaderFor (file));
 
-    if (reader == nullptr || reader->sampleRate <= 0.0 || reader->lengthInSamples <= 0)
+    if (! isReadable (reader.get()))
     {
         error = "\"" + file.getFileName() + "\" could not be read as an audio file.";
         return {};

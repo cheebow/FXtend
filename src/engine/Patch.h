@@ -16,6 +16,15 @@ inline constexpr int numFxTypes = 6;
 
 enum class LengthUnit { bars = 0, beats, quarterNotes };
 enum class RetriggerMode { restart = 0, overlap };
+
+/** What a MIDI note does while the host is not playing. With the host playing
+    a note always plays its full length, whatever this says. */
+enum class StoppedNotes
+{
+    full = 0,   // the whole FX, like during playback
+    gate,       // only for as long as the key is held
+    off         // nothing: the host's note audition stays silent
+};
 enum class TailMode { strict = 0, natural };
 
 enum class SynthType { noise = 0, sub, fm, transient, clap };

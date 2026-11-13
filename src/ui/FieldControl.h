@@ -59,17 +59,12 @@ private:
     juce::ComboBox box;
     juce::ToggleButton toggle;
 
+    void showDynamicChoice (int index);
+
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> sliderAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> boxAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> buttonAttachment;
     std::unique_ptr<juce::ParameterAttachment> dynamicAttachment;
-};
-
-/** A grid of FieldControls: rows with a title on the left, a fixed number of columns. */
-struct FieldRow
-{
-    const char* title;
-    std::array<const char*, 7> ids;     // empty strings leave a gap
 };
 
 inline constexpr int fieldColumns = 7;

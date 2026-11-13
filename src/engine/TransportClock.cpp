@@ -15,6 +15,7 @@ void TransportClock::prepare (double newSampleRate) noexcept
 void TransportClock::reset() noexcept
 {
     nextPpq = 0.0;
+    lastBlockQn = 0.0;
     wasSynced = false;
     wasPlaying = false;
     firstBlock = true;
@@ -48,8 +49,11 @@ BlockTiming TransportClock::beginBlock (const TransportState& state, int numSamp
 
         // The host only reports one tempo per block, so a tempo ramp makes the
         // real position drift a little from our prediction. Anything beyond
-        // this tolerance is a seek or a loop wrap rather than drift.
-        const double tolerance = std::max (0.05, 0.5 * blockQn);
+        // this tolerance is a seek or a loop wrap rather than drift. The
+        // prediction was made with the previous block's tempo, so that block
+        // counts as well: after a tempo drop the new block alone is too small
+        // a measure, and the step would be taken for a seek.
+        const double tolerance = std::max (0.05, 0.5 * std::max (blockQn, lastBlockQn));
         t.discontinuity = ! wasSynced || std::abs (state.ppq - nextPpq) > tolerance;
     }
     else
@@ -65,6 +69,7 @@ BlockTiming TransportClock::beginBlock (const TransportState& state, int numSamp
         t.discontinuity = false;
 
     nextPpq = t.ppqStart + blockQn;
+    lastBlockQn = blockQn;
     wasSynced = t.hostSynced;
     wasPlaying = state.isPlaying;
     firstBlock = false;

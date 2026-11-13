@@ -23,7 +23,6 @@ public:
 
     static int getPreferredHeight() noexcept;
 
-    int getSelectedSlot() const noexcept { return selectedSlot; }
 
     /** Called when the user picks another slot. */
     std::function<void (int)> onSlotSelected;
@@ -73,6 +72,7 @@ private:
     int selectedSlot = 0;
     int dragTargetSlot = -1;
     int shownRevision = -1;
+    std::array<bool, fxtend::numSampleLayers> shownToggleStates {};
     float shownTrimStart = -1.0f, shownTrimEnd = -1.0f;
     bool shownReverse = false;
 

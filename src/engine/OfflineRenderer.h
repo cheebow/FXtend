@@ -29,6 +29,13 @@ struct RenderResult
     bool completed = false;             // false if aborted
 };
 
+/** The tempo a request is rendered at: its bpm, kept above 1 so that a host
+    reporting no tempo (0) cannot stretch the length to infinity. */
+double getRenderBpm (const RenderRequest& request) noexcept;
+
+/** Body length in seconds for a request (fixed tempo). */
+double getBodyLengthInSeconds (const RenderRequest& request) noexcept;
+
 /** Body length in samples for a request (fixed tempo). */
 int getBodyLengthInSamples (const RenderRequest& request) noexcept;
 

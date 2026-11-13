@@ -12,6 +12,9 @@ namespace
     constexpr double halfPi = 1.5707963267948966;
     constexpr double maxLoopCrossfadeSeconds = 0.05;
 
+    // Audio shorter than this cannot be played (the region maths needs room).
+    constexpr int minimumFrames = 16;
+
     // How quickly a phase-locked layer pulls back onto the host timeline after
     // a small drift, and how far off it may be before it simply jumps.
     constexpr double resyncSamples = 2048.0;
@@ -60,7 +63,8 @@ void SampleLayer::control (const SampleLayerParams& params, const SampleSource& 
     const double layerStart = std::clamp ((double) params.start, 0.0, 1.0);
     const double layerEnd = std::max (layerStart + 1.0e-4, std::min (1.0, (double) params.end));
     const double progress = (voicePhase - layerStart) / (layerEnd - layerStart);
-    const bool available = params.isEnabled() && source.raw != nullptr && source.raw->getNumFrames() > 16;
+    const bool hasAudio = source.raw != nullptr && source.raw->getNumFrames() > minimumFrames;
+    const bool available = params.isEnabled() && hasAudio;
 
     bool justStarted = false;
 
@@ -73,15 +77,28 @@ void SampleLayer::control (const SampleLayerParams& params, const SampleSource& 
         needsReposition = true;
         justStarted = true;
     }
-    else if (stage == Stage::playing && (progress >= 1.0 || ! available))
+    else if (stage == Stage::playing && (progress >= 1.0 || ! params.isEnabled()))
     {
         stage = Stage::ending;
         endingSamples = 0;
         endingStep = (float) (1.0 / std::max (1.0, layerEndFadeSeconds * sampleRate));
     }
 
-    if ((stage != Stage::playing && stage != Stage::ending) || source.raw == nullptr)
+    if (stage != Stage::playing && stage != Stage::ending)
     {
+        buffer = nullptr;
+        return;
+    }
+
+    if (! hasAudio)
+    {
+        // Nothing to read for now: the audio is being swapped (the audio thread
+        // could not get at it for this block) or the slot was emptied. A layer
+        // that is still playing keeps its place and carries on when the audio
+        // is back; one that was fading out has nothing left to fade.
+        if (stage == Stage::ending)
+            stage = Stage::done;
+
         buffer = nullptr;
         return;
     }
@@ -89,7 +106,7 @@ void SampleLayer::control (const SampleLayerParams& params, const SampleSource& 
     // ---- Decide what to read ---------------------------------------------
     const auto mode = params.getMode();
     const bool useStretched = mode == SampleMode::stretch && source.stretched != nullptr
-                              && source.stretched->getNumFrames() > 16;
+                              && source.stretched->getNumFrames() > minimumFrames;
     const SampleData& data = useStretched ? *source.stretched : *source.raw;
     const auto* newBuffer = &data.audio;
 
@@ -113,8 +130,8 @@ void SampleLayer::control (const SampleLayerParams& params, const SampleSource& 
     {
         const double trimStart = std::clamp ((double) params.trimStart, 0.0, 1.0) * frames;
         const double trimEnd = std::clamp ((double) params.trimEnd, 0.0, 1.0) * frames;
-        regionStart = std::min (trimStart, frames - 16.0);
-        regionLength = std::clamp (trimEnd - regionStart, 16.0, frames - regionStart);
+        regionStart = std::min (trimStart, frames - (double) minimumFrames);
+        regionLength = std::clamp (trimEnd - regionStart, (double) minimumFrames, frames - regionStart);
         reversed = params.isReversed();
     }
 
@@ -224,7 +241,9 @@ void SampleLayer::render (float* left, float* right, int numSamples) noexcept
         {
             if (position >= loopLength)
             {
-                position -= loopLength;
+                // fmod, not one subtraction: the loop may have become much
+                // shorter than where the read position already is.
+                position = std::fmod (position, loopLength);
                 firstLoopCycle = false;
             }
 

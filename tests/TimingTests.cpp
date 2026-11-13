@@ -1,4 +1,5 @@
 #include "TestHost.h"
+#include "engine/FxTemplates.h"
 
 #include <cmath>
 
@@ -331,4 +332,164 @@ TEST_CASE ("Rapid retriggers never run out of voices or blow up", "[timing]")
     REQUIRE (engine.getStatus().noteOnCount.load() == 200);
     REQUIRE (fxtest::peakBetween (audio, 0, 3 * 48000) < 8.0f);
     requireEndsAt (audio, 199 * 37 + 90000);
+}
+
+TEST_CASE ("Unusual blocks and MIDI are handled without fuss", "[timing]")
+{
+    FxEngine engine;
+    EngineSettings settings;
+    settings.lengthValue = 4.0;
+    engine.setSettings (settings);
+    engine.setPatch (fxtest::steadyNoisePatch());
+    engine.prepare (48000.0, 512);
+
+    juce::AudioBuffer<float> buffer (2, 512);
+    const TransportState stopped;       // free-running on the manual tempo
+
+    const auto run = [&] (const juce::MidiBuffer& midi)
+    {
+        engine.process (buffer, midi, stopped);
+        return buffer.getMagnitude (0, 512);
+    };
+
+    juce::MidiBuffer noteOn;
+    noteOn.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+    run (noteOn);
+    REQUIRE (run ({}) > 0.01f);
+
+    SECTION ("An empty block changes nothing")
+    {
+        juce::AudioBuffer<float> empty (2, 0);
+        engine.process (empty, noteOn, stopped);
+        REQUIRE (engine.getStatus().noteOnCount.load() == 1);
+        REQUIRE (run ({}) > 0.01f);
+    }
+
+    SECTION ("A Note On with velocity 0 and a SysEx message are not notes")
+    {
+        const juce::uint8 dump[64] = {};
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 0), 0);
+        midi.addEvent (juce::MidiMessage::createSysExMessage (dump, (int) sizeof (dump)), 10);
+        midi.addEvent (juce::MidiMessage::noteOff (1, 60), 20);
+
+        REQUIRE (run (midi) > 0.01f);
+        REQUIRE (engine.getStatus().noteOnCount.load() == 1);
+    }
+
+    SECTION ("All Sound Off (the host's panic) silences everything at once")
+    {
+        juce::MidiBuffer panic;
+        panic.addEvent (juce::MidiMessage::allSoundOff (1), 0);
+
+        REQUIRE (run (panic) == 0.0f);
+        REQUIRE (engine.isSilent());
+        REQUIRE (run ({}) == 0.0f);
+    }
+}
+
+TEST_CASE ("A tempo drop inside a large block is not mistaken for a seek", "[timing]")
+{
+    // The host reports one tempo per block. When the tempo halves part-way
+    // through a 2048-sample block, the next block starts a little earlier than
+    // predicted - by more than the old tolerance allowed at the new, slower tempo.
+    HostSim host;
+    host.sampleRate = 44100.0;
+    host.blockSize = 2048;
+    host.events = { { 0, true } };
+    host.bpmAt = [] (long long position) { return position < 4 * 2048 ? 140.0 : 70.0; };
+    host.beforeBlock = [] (long long position, HostSim&, double& ppq)
+    {
+        if (position == 4 * 2048)
+            ppq -= 0.052;       // the tempo had already dropped during the block before
+    };
+
+    FxEngine engine;
+    prepare (engine, host);
+    host.render (engine, 12 * 2048);
+
+    REQUIRE (engine.getStatus().discontinuityCount.load() == 0);
+    REQUIRE (engine.getStatus().activeVoices.load() == 1);
+}
+
+TEST_CASE ("While the host is stopped, the setting decides what a note does", "[timing]")
+{
+    // What a DAW sends when a note is moved in its piano roll: a short note.
+    constexpr long long noteStart = 700, noteEnd = noteStart + 4800, oneBarAt120 = 96000;
+
+    HostSim host;
+    host.events = { { noteStart, true }, { noteEnd, false } };
+
+    FxEngine engine;
+    EngineSettings settings;
+    settings.lengthValue = 1.0;
+    settings.manualBpm = 120.0;
+    host.bpmAt = [] (long long) { return 120.0; };
+
+    const auto play = [&] (StoppedNotes mode, bool hostPlaying, const Patch& patch)
+    {
+        host.playing = hostPlaying;
+        settings.stoppedNotes = mode;
+        engine.setSettings (settings);
+        engine.setPatch (patch);
+        engine.prepare (host.sampleRate, host.blockSize);
+        return host.render (engine, 3 * 48000);
+    };
+
+    SECTION ("Full: the whole FX, as during playback")
+    {
+        requireEndsAt (play (StoppedNotes::full, false, fxtest::steadyNoisePatch()), noteStart + oneBarAt120);
+    }
+
+    SECTION ("Gate: only while the key is held")
+    {
+        const auto audio = play (StoppedNotes::gate, false, fxtest::steadyNoisePatch());
+
+        REQUIRE (fxtest::firstAudible (audio) >= noteStart);
+        REQUIRE (fxtest::peakBetween (audio, noteStart + 480, noteEnd) > 0.01f);
+        REQUIRE (fxtest::lastAudible (audio, 1.0e-5f) >= noteEnd - 1);
+        REQUIRE (fxtest::lastAudible (audio, 1.0e-5f) < noteEnd + 480);         // a 5 ms fade, no more
+        REQUIRE (engine.isSilent());
+    }
+
+    SECTION ("Gate: a Natural reverb tail ends with the key too")
+    {
+        Patch patch = makeTemplate (FxType::impact);
+        patch.tailMode = TailMode::natural;
+        patch.master.reverbMix = 0.6f;
+
+        const auto audio = play (StoppedNotes::gate, false, patch);
+        REQUIRE (fxtest::lastAudible (audio, 1.0e-5f) < noteEnd + 480);
+    }
+
+    SECTION ("Gate: a key held beyond the end of the FX changes nothing")
+    {
+        host.events = { { noteStart, true }, { noteStart + oneBarAt120 + 9600, false } };
+        requireEndsAt (play (StoppedNotes::gate, false, fxtest::steadyNoisePatch()), noteStart + oneBarAt120);
+    }
+
+    SECTION ("Off: silent")
+    {
+        const auto audio = play (StoppedNotes::off, false, fxtest::steadyNoisePatch());
+        REQUIRE (fxtest::peakBetween (audio, 0, 3 * 48000) == 0.0f);
+        REQUIRE (engine.getStatus().noteOnCount.load() == 0);
+    }
+
+    SECTION ("The preview button plays in full whatever the setting")
+    {
+        host.events.clear();
+        settings.stoppedNotes = StoppedNotes::off;
+        engine.setSettings (settings);
+        engine.setPatch (fxtest::steadyNoisePatch());
+        engine.prepare (host.sampleRate, host.blockSize);
+        engine.triggerPreview();
+        host.playing = false;
+        requireEndsAt (host.render (engine, 3 * 48000), oneBarAt120);
+    }
+
+    SECTION ("With the host playing, a short note still plays its full length")
+    {
+        for (const auto mode : { StoppedNotes::gate, StoppedNotes::off })
+            requireEndsAt (play (mode, true, fxtest::steadyNoisePatch()), noteStart + oneBarAt120);
+    }
 }

@@ -18,12 +18,14 @@ namespace fxui
     line is mono, a round cloud is wide. The bar underneath is the correlation:
     right (+1) means mono-compatible, left (-1) means the channels cancel. */
 class StereoScope final : public juce::Component,
+                          public juce::SettableTooltipClient,
                           private juce::Timer
 {
 public:
     explicit StereoScope (const fxtend::EngineStatus& statusToShow) : status (statusToShow)
     {
-        setTooltip();
+        setTooltip (description);
+        setHelpText (description);
         startTimerHz (30);
     }
 
@@ -97,11 +99,9 @@ public:
 private:
     static constexpr int numPoints = fxtend::EngineStatus::scopeSize;
 
-    void setTooltip()
-    {
-        setHelpText ("Stereo picture of the output: a thin vertical line is mono, a round cloud is wide. "
-                     "The bar shows how well left and right agree; to the left of the middle they cancel in mono.");
-    }
+    static constexpr const char* description =
+        "Stereo picture of the output: a thin vertical line is mono, a round cloud is wide. "
+        "The bar shows how well left and right agree; to the left of the middle they cancel in mono.";
 
     void timerCallback() override
     {

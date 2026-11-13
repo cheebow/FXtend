@@ -10,17 +10,23 @@ namespace fxtend
 namespace
 {
     constexpr int blockSize = 512;
+    constexpr double cutTailFadeSeconds = 0.1;
+}
 
-    double bodyLengthQn (const RenderRequest& request) noexcept
-    {
-        return FxEngine::lengthInQuarterNotes (request.settings.lengthUnit, request.settings.lengthValue, request.timeSig);
-    }
+double getRenderBpm (const RenderRequest& request) noexcept
+{
+    return std::max (1.0, request.bpm);
+}
+
+double getBodyLengthInSeconds (const RenderRequest& request) noexcept
+{
+    const double lengthQn = FxEngine::lengthInQuarterNotes (request.settings.lengthUnit, request.settings.lengthValue, request.timeSig);
+    return lengthQn * 60.0 / getRenderBpm (request);
 }
 
 int getBodyLengthInSamples (const RenderRequest& request) noexcept
 {
-    const double seconds = bodyLengthQn (request) * 60.0 / std::max (1.0, request.bpm);
-    return (int) std::ceil (seconds * request.sampleRate - 1.0e-6);
+    return (int) std::ceil (getBodyLengthInSeconds (request) * request.sampleRate - 1.0e-6);
 }
 
 RenderResult renderOffline (const RenderRequest& request, const std::function<bool()>& shouldAbort)
@@ -41,13 +47,15 @@ RenderResult renderOffline (const RenderRequest& request, const std::function<bo
     engine->setPatch (request.patch);
     engine->prepare (request.sampleRate, blockSize);
 
-    const double qnPerSample = request.bpm / (60.0 * request.sampleRate);
+    // One tempo for the length of the body and for the timeline it is played against.
+    const double bpm = getRenderBpm (request);
+    const double qnPerSample = bpm / (60.0 * request.sampleRate);
 
     TransportState transport;
     transport.isPlaying = true;
     transport.hasPpq = true;
     transport.hasBpm = true;
-    transport.bpm = request.bpm;
+    transport.bpm = bpm;
     transport.hasTimeSig = true;
     transport.timeSig = request.timeSig;
 
@@ -56,6 +64,7 @@ RenderResult renderOffline (const RenderRequest& request, const std::function<bo
 
     juce::AudioBuffer<float> block (2, blockSize);
     int position = 0;
+    bool rangOut = false;
 
     while (position < maxSamples)
     {
@@ -81,7 +90,25 @@ RenderResult renderOffline (const RenderRequest& request, const std::function<bo
         position += numSamples;
 
         if (position >= result.bodySamples && engine->isSilent())
+        {
+            rangOut = true;
             break;
+        }
+    }
+
+    // A tail still ringing at the time limit is faded rather than chopped off
+    // (the fade stays inside the tail and never reaches into the body).
+    if (! rangOut)
+    {
+        const int total = (int) left.size();
+        const int fadeSamples = std::min (total - result.bodySamples, (int) (cutTailFadeSeconds * request.sampleRate));
+
+        for (int n = 0; n < fadeSamples; ++n)
+        {
+            const float gain = (float) (fadeSamples - 1 - n) / (float) fadeSamples;
+            left[(size_t) (total - fadeSamples + n)] *= gain;
+            right[(size_t) (total - fadeSamples + n)] *= gain;
+        }
     }
 
     // Drop the silence after the last audible sample of the tail (never cutting into the body).

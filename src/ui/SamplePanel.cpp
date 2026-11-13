@@ -114,7 +114,17 @@ SamplePanel::SamplePanel (FXtendAudioProcessor& processorToUse) : processor (pro
 
         auto& toggle = slotToggles[(size_t) i];
         toggle.setTooltip ("Sample " + juce::String (i + 1) + " on / off");
-        toggle.onStateChange = [this] { shownRevision = -1; };
+        toggle.onStateChange = [this, i]
+        {
+            // Also fires when the mouse merely moves over the button.
+            const bool isOn = slotToggles[(size_t) i].getToggleState();
+
+            if (isOn != shownToggleStates[(size_t) i])
+            {
+                shownToggleStates[(size_t) i] = isOn;
+                shownRevision = -1;
+            }
+        };
         addAndMakeVisible (toggle);
 
         if (const auto* onField = findField ("on"))
@@ -351,6 +361,7 @@ void SamplePanel::showSlotMenu (int slot)
                 safeThis->processor.clearSample (i);
     });
 
+    menu.setLookAndFeel (&getLookAndFeel());
     menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (slotButtons[(size_t) slot]));
 }
 

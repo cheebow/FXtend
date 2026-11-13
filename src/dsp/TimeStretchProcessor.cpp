@@ -14,6 +14,10 @@ namespace
     constexpr int minimumFrames = 64;
     constexpr int chunkFrames = 2048;
 
+    // Longer results are not rendered (the layer then plays at variable speed
+    // instead): at very slow tempos a render would need gigabytes of memory.
+    constexpr double maxTargetSeconds = 300.0;
+
     struct Region
     {
         int start = 0;
@@ -61,6 +65,13 @@ StretchJob makeStretchJob (const SampleData::Ptr& source, const SampleLayerParam
     if (job.getSourceSeconds() < 0.005)
         return {};
 
+    // The same limits as stretchSample, so a job it would refuse never counts
+    // as "wanted" (the editor would wait for its render for ever).
+    if (getRegion (job).length < minimumFrames
+        || job.targetSeconds * source->sampleRate < (double) minimumFrames
+        || job.targetSeconds > maxTargetSeconds)
+        return {};
+
     return job;
 }
 
@@ -71,6 +82,9 @@ SampleData::Ptr stretchSample (const StretchJob& job, const std::function<bool()
 
     const auto region = getRegion (job);
     const double sampleRate = job.source->sampleRate;
+    if (job.targetSeconds > maxTargetSeconds)
+        return {};
+
     const int targetFrames = (int) std::llround (job.targetSeconds * sampleRate);
 
     if (region.length < minimumFrames || targetFrames < minimumFrames)

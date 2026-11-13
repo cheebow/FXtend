@@ -11,12 +11,14 @@ namespace
 {
     constexpr double minLengthQn = 0.25;
     constexpr double maxLengthBars = 32.0;
+    constexpr float silenceThreshold = 1.0e-4f;
 }
 
 FxEngine::FxEngine()
 {
     patch = makeTemplate (FxType::riser);
     effectivePatch = patch;
+    heldNotes.fill (notHeld);
 }
 
 void FxEngine::prepare (double newSampleRate, int maxBlockSize)
@@ -36,10 +38,8 @@ void FxEngine::prepare (double newSampleRate, int maxBlockSize)
 
 void FxEngine::reset() noexcept
 {
-    killAllVoices();
+    silenceNow();
     clock.reset();
-    masterFx.reset();
-    outputActive = false;
 }
 
 double FxEngine::lengthInQuarterNotes (LengthUnit unit, double value, TimeSignature timeSig) noexcept
@@ -70,10 +70,49 @@ void FxEngine::killAllVoices() noexcept
     for (auto& voice : voices)
         voice.kill();
 
+    heldNotes.fill (notHeld);
     newestVoice = nullptr;
 }
 
-void FxEngine::noteOn (int sampleOffset, float velocity, const BlockTiming& timing) noexcept
+void FxEngine::silenceNow() noexcept
+{
+    killAllVoices();
+    masterFx.reset();
+    outputActive = false;
+    endedByRelease = false;
+}
+
+void FxEngine::releaseHeldNotes (int noteKey, int sampleOffset) noexcept
+{
+    bool released = false;
+
+    for (size_t i = 0; i < voices.size(); ++i)
+    {
+        if (heldNotes[i] == notHeld || (noteKey != anyNote && heldNotes[i] != noteKey))
+            continue;
+
+        heldNotes[i] = notHeld;
+
+        // A key let go after its FX has finished changes nothing: the whole
+        // sound was heard, and a Natural tail may ring out.
+        if (voices[i].isInBody())
+        {
+            voices[i].release (sampleOffset);
+            released = true;
+        }
+    }
+
+    if (! released)
+        return;
+
+    for (const auto& voice : voices)
+        if (voice.isInBody())
+            return;         // other keys are still held
+
+    endedByRelease = true;
+}
+
+void FxEngine::noteOn (int sampleOffset, float velocity, const BlockTiming& timing, int heldNote) noexcept
 {
     if (settings.retrigger == RetriggerMode::restart)
     {
@@ -132,6 +171,8 @@ void FxEngine::noteOn (int sampleOffset, float velocity, const BlockTiming& timi
 
     target->start (start);
     newestVoice = target;
+    heldNotes[(size_t) (target - voices.data())] = heldNote;
+    endedByRelease = false;
 
     status.lastNoteOnOffset.store (sampleOffset, std::memory_order_relaxed);
     status.lastNoteOnPpq.store (start.startPpq, std::memory_order_relaxed);
@@ -144,7 +185,10 @@ void FxEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer
     const int numChannels = buffer.getNumChannels();
 
     if (numSamples <= 0)
+    {
+        sampleSources = {};     // the promise below holds for an empty block too
         return;
+    }
 
     if (mixBuffer.getNumSamples() < numSamples)
         mixBuffer.setSize (3, numSamples, false, false, true);   // host exceeded its promised block size
@@ -159,23 +203,42 @@ void FxEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer
     }
 
     if (pendingStop.exchange (false, std::memory_order_acquire))
-    {
-        killAllVoices();
-        masterFx.reset();
-        outputActive = false;
-    }
+        silenceNow();
 
     const float previewVelocity = pendingPreviewVelocity.exchange (-1.0f, std::memory_order_acquire);
 
     if (previewVelocity > 0.0f)
         noteOn (0, previewVelocity, timing);
 
-    for (const auto metadata : midi)
-    {
-        const auto message = metadata.getMessage();
+    // With the host playing, a note plays its full length and Note Offs are
+    // ignored. While it is stopped, the notes that arrive are mostly the host
+    // auditioning a note being drawn or moved in an editor, where a whole
+    // 4-bar FX each time is a nuisance: the setting decides what they do.
+    const bool stopped = ! timing.hostSynced;
+    const auto whenStopped = stopped ? settings.stoppedNotes : StoppedNotes::full;
 
-        if (message.isNoteOn())     // velocity 0 counts as a Note Off and is ignored
-            noteOn (std::clamp (metadata.samplePosition, 0, numSamples - 1), message.getFloatVelocity(), timing);
+    for (const auto event : midi)
+    {
+        const int offset = std::clamp (event.samplePosition, 0, numSamples - 1);
+
+        if (isNoteOn (event))
+        {
+            if (whenStopped != StoppedNotes::off)
+                noteOn (offset, getNoteVelocity (event), timing,
+                        whenStopped == StoppedNotes::gate ? getNoteKey (event) : notHeld);
+        }
+        else if (isNoteOff (event))
+        {
+            releaseHeldNotes (getNoteKey (event), offset);
+        }
+        else if (isAllNotesOff (event))
+        {
+            releaseHeldNotes (anyNote, offset);
+        }
+        else if (isAllSoundOff (event))     // a host's "panic"
+        {
+            silenceNow();
+        }
     }
 
     float* left = mixBuffer.getWritePointer (0);
@@ -206,7 +269,7 @@ void FxEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer
     // Master section. It is skipped entirely while nothing sounds, and its
     // delay/reverb memory is wiped when the sound has ended, so a Strict FX
     // can never leak an old tail into the next trigger.
-    const bool strict = effectivePatch.tailMode == TailMode::strict;
+    const bool strict = effectivePatch.tailMode == TailMode::strict || endedByRelease;
 
     if (voicesSounding)
     {
@@ -215,22 +278,8 @@ void FxEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer
     }
 
     if (outputActive)
-    {
         masterFx.process (left, right, numSamples, effectivePatch.master, effectivePatch.masterGainDb,
                           timing.bpm, bodyGate, strict);
-
-        if (active == 0)
-        {
-            const bool wetAudible = ! strict && masterFx.getWetPeak() > 1.0e-4f;
-            quietSeconds = wetAudible ? 0.0 : quietSeconds + numSamples / sampleRate;
-
-            if (strict || quietSeconds > masterFx.getDelaySeconds() + 0.15)
-            {
-                masterFx.reset();
-                outputActive = false;
-            }
-        }
-    }
 
     float peakLeft = 0.0f, peakRight = 0.0f;
 
@@ -248,12 +297,30 @@ void FxEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer
         }
     }
 
-    status.peakLeft.store (peakLeft, std::memory_order_relaxed);
-    status.peakRight.store (peakRight, std::memory_order_relaxed);
-    status.tailActive.store (outputActive && active == 0, std::memory_order_relaxed);
+    if (outputActive && active == 0)
+    {
+        // The tail is over when it can no longer be heard. The wet signal is
+        // measured before the output gain, compressor and limiter boost, which
+        // can lift it by tens of dB, so what actually leaves is checked too.
+        const bool audible = ! strict && (masterFx.getWetPeak() > silenceThreshold
+                                          || std::max (peakLeft, peakRight) > silenceThreshold);
+        quietSeconds = audible ? 0.0 : quietSeconds + numSamples / sampleRate;
 
-    if (peakLeft > 1.0f || peakRight > 1.0f)
-        status.clipCount.fetch_add (1, std::memory_order_relaxed);
+        if (strict || quietSeconds > masterFx.getDelaySeconds() + 0.15)
+        {
+            masterFx.reset();
+            outputActive = false;
+        }
+    }
+
+    writeOutput (buffer, left, right);
+    publishStatus (timing, active, peakLeft, peakRight);
+}
+
+void FxEngine::writeOutput (juce::AudioBuffer<float>& buffer, const float* left, const float* right) const noexcept
+{
+    const int numSamples = buffer.getNumSamples();
+    const int numChannels = buffer.getNumChannels();
 
     if (numChannels == 1)
     {
@@ -270,6 +337,16 @@ void FxEngine::process (juce::AudioBuffer<float>& buffer, const juce::MidiBuffer
         for (int channel = 2; channel < numChannels; ++channel)
             buffer.clear (channel, 0, numSamples);
     }
+}
+
+void FxEngine::publishStatus (const BlockTiming& timing, int active, float peakLeft, float peakRight) noexcept
+{
+    status.peakLeft.store (peakLeft, std::memory_order_relaxed);
+    status.peakRight.store (peakRight, std::memory_order_relaxed);
+    status.tailActive.store (outputActive && active == 0, std::memory_order_relaxed);
+
+    if (peakLeft > 1.0f || peakRight > 1.0f)
+        status.clipCount.fetch_add (1, std::memory_order_relaxed);
 
     status.bpm.store (timing.bpm, std::memory_order_relaxed);
     status.ppq.store (timing.ppqStart, std::memory_order_relaxed);

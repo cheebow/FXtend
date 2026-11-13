@@ -1,5 +1,6 @@
 #include "PresetManager.h"
 #include "FactoryPresets.h"
+#include "../Storage.h"
 
 namespace fxtend
 {
@@ -13,12 +14,7 @@ PresetManager::PresetManager (const juce::File& directory) : userDirectory (dire
 
 juce::File PresetManager::getDefaultUserDirectory()
 {
-    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory)
-#if JUCE_MAC
-        .getChildFile ("Application Support")
-#endif
-        .getChildFile ("FXtend")
-        .getChildFile ("Presets");
+    return getAppDataDirectory().getChildFile ("Presets");
 }
 
 void PresetManager::refresh()

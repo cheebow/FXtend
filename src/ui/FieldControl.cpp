@@ -33,7 +33,7 @@ FieldControl::FieldControl (juce::AudioProcessorValueTreeState& state, const Des
 
         dynamicAttachment = std::make_unique<juce::ParameterAttachment> (*parameter, [this] (float value)
         {
-            box.setSelectedId (juce::roundToInt (value) + 1, juce::dontSendNotification);
+            showDynamicChoice (juce::roundToInt (value));
         });
     }
     else if (field.isChoice)
@@ -63,12 +63,19 @@ void FieldControl::setChoices (const juce::StringArray& names, const juce::Strin
     box.addItemList (names, 1);
 
     if (parameter != nullptr && ! names.isEmpty())
-    {
-        const int index = juce::roundToInt (parameter->convertFrom0to1 (parameter->getValue()));
-        box.setSelectedId (juce::jlimit (0, names.size() - 1, index) + 1, juce::dontSendNotification);
-    }
+        showDynamicChoice (juce::roundToInt (parameter->convertFrom0to1 (parameter->getValue())));
 
     title.setText (caption, juce::dontSendNotification);
+}
+
+void FieldControl::showDynamicChoice (int index)
+{
+    // The same setting means different things for different layer types, and a
+    // value left over from a type with more choices (Noise: Brown) can be out
+    // of range for this one. The engine plays such a value as the first choice,
+    // so that is what is shown.
+    const int shown = juce::isPositiveAndBelow (index, box.getNumItems()) ? index : 0;
+    box.setSelectedId (shown + 1, juce::dontSendNotification);
 }
 
 void FieldControl::setRelevant (bool isRelevant)

@@ -39,6 +39,8 @@ public:
     bool isBusesLayoutSupported (const BusesLayout& layouts) const override;
     void processBlock (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
     using juce::AudioProcessor::processBlock;
+    void processBlockBypassed (juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+    using juce::AudioProcessor::processBlockBypassed;
 
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override                         { return true; }
@@ -108,7 +110,7 @@ public:
         return status.activeVoices.load() > 0 || status.tailActive.load();
     }
     juce::Result saveUserPreset (const juce::String& name);
-    juce::String getCurrentPresetName() const                       { return currentPresetName; }
+    juce::String getCurrentPresetName() const;
 
     /** User presets can be renamed and deleted; factory presets cannot. */
     bool isCurrentPresetUserPreset() const;
@@ -123,7 +125,7 @@ public:
     /** Randomises the macro knobs of the current FX type. Undo (below) takes
         back the last Random or the last FX type change that discarded samples. */
     void randomise();
-    bool canUndoRandomise() const noexcept                          { return hasUndoPatch; }
+    bool canUndoRandomise() const noexcept                          { return hasUndoPatch.load(); }
     void undoRandomise();
 
     /** Plays the current FX once, as if a key had been pressed. */
@@ -177,6 +179,22 @@ private:
 
     void timerCallback() override;
     fxtend::TransportState readTransport() const;
+
+    /** Parameters and curves in one consistent read (any thread but the audio thread). */
+    void readCurrentSound (fxtend::Patch& patch, fxtend::EngineSettings& settings) const;
+
+    /** Also bumps the patch revision, so the editor shows the new name. */
+    void setCurrentPresetName (const juce::String& name);
+
+    /** Stops what is playing because the sound is being replaced. Returns
+        whether the new sound should be played from its start once it is in place. */
+    bool stopForNewSound();
+
+    void notifyHostOfStateChange();
+
+    /** Audio thread: remembers the tempo of the block about to be rendered,
+        for the stretch renders to aim at. */
+    void noteTempo (const fxtend::TransportState& transport, const fxtend::EngineSettings& settings) noexcept;
     void setCurves (const fxtend::Patch& patch);
     static void copyCurves (const CurveSet& curves, fxtend::Patch& patch) noexcept;
 
@@ -196,7 +214,7 @@ private:
     // `curves`; the audio thread picks up changes without ever waiting.
     CurveSet curves;
     CurveSet audioCurves;
-    juce::SpinLock curveLock;
+    mutable juce::SpinLock curveLock;
     std::atomic<bool> curvesChanged { true };
 
     // Sample slots, shared between the message thread and the stretch worker
@@ -210,6 +228,8 @@ private:
     juce::SpinLock sampleLock;
     std::unique_ptr<StretchWorker> stretchWorker;
     std::atomic<int> sampleRevision { 0 };
+    std::atomic<double> stretchBpm { 120.0 };
+    std::atomic<int> stretchTimeSigNumerator { 4 }, stretchTimeSigDenominator { 4 };
 
     fxtend::Patch audioPatch;
 
@@ -227,9 +247,12 @@ private:
     bool auditionActive = false;            // audio thread
     fxtend::EngineSettings audioSettings;
 
+    // Hosts may save and restore state from a thread of their own while the
+    // editor reads the name, hence the lock.
     juce::String currentPresetName;
+    mutable juce::CriticalSection nameLock;
     fxtend::Patch undoPatch;
-    bool hasUndoPatch = false;
+    std::atomic<bool> hasUndoPatch { false };
     fxtend::PresetData undoPreset;     // used instead of undoPatch when undoIncludesSamples
     bool undoIncludesSamples = false;
     juce::Random random;

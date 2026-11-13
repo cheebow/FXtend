@@ -153,6 +153,14 @@ juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout()
         masterGroup->addChild (makeFieldParameter (ParamIDs::master (field), juce::String ("Master ") + field.name, field));
 
     layout.add (std::move (masterGroup));
+
+    // Added after the first release, so it goes last: hosts that number
+    // parameters by position keep the numbers they have saved.
+    // The standalone app has no transport and is always "stopped", so there a
+    // key press plays the whole FX; in a host the default is Gate.
+    const auto stoppedDefault = juce::JUCEApplicationBase::isStandaloneApp() ? StoppedNotes::full : StoppedNotes::gate;
+    layout.add (std::make_unique<Choice> (pid (ParamIDs::stoppedNotes), "Notes While Stopped",
+                                          splitChoices (stoppedNotesChoices), (int) stoppedDefault));
     return layout;
 }
 
@@ -163,6 +171,7 @@ ParameterReader::ParameterReader (juce::AudioProcessorValueTreeState& state)
     lengthValue = state.getRawParameterValue (ParamIDs::lengthValue);
     tailMode = state.getRawParameterValue (ParamIDs::tailMode);
     retrigger = state.getRawParameterValue (ParamIDs::retrigger);
+    stoppedNotes = state.getRawParameterValue (ParamIDs::stoppedNotes);
     manualBpm = state.getRawParameterValue (ParamIDs::manualBpm);
     masterGain = state.getRawParameterValue (ParamIDs::masterGain);
 
@@ -181,12 +190,17 @@ ParameterReader::ParameterReader (juce::AudioProcessorValueTreeState& state)
         masterValues.push_back (state.getRawParameterValue (ParamIDs::master (field)));
 }
 
+TailMode ParameterReader::readTailMode() const noexcept
+{
+    return tailMode->load (std::memory_order_relaxed) >= 0.5f ? TailMode::natural : TailMode::strict;
+}
+
 void ParameterReader::read (Patch& patch, EngineSettings& settings) const noexcept
 {
     const auto load = [] (const std::atomic<float>* value) { return value->load (std::memory_order_relaxed); };
 
     patch.fxType = (FxType) juce::jlimit (0, numFxTypes - 1, juce::roundToInt (load (fxType)));
-    patch.tailMode = load (tailMode) >= 0.5f ? TailMode::natural : TailMode::strict;
+    patch.tailMode = readTailMode();
     patch.masterGainDb = load (masterGain);
 
     for (size_t i = 0; i < macros.size(); ++i)
@@ -212,6 +226,7 @@ void ParameterReader::read (Patch& patch, EngineSettings& settings) const noexce
     settings.lengthUnit = (LengthUnit) juce::jlimit (0, 2, juce::roundToInt (load (lengthUnit)));
     settings.lengthValue = load (lengthValue);
     settings.retrigger = load (retrigger) >= 0.5f ? RetriggerMode::overlap : RetriggerMode::restart;
+    settings.stoppedNotes = (StoppedNotes) juce::jlimit (0, 2, juce::roundToInt (load (stoppedNotes)));
     settings.manualBpm = load (manualBpm);
 }
 

@@ -89,6 +89,13 @@ namespace
                 object.setProperty (field.id, juce::roundToInt (value));
         }
     }
+
+    template <typename Params, typename FieldType>
+    void readFields (const juce::var& object, Params& params, std::span<const FieldType> fields)
+    {
+        for (const auto& field : fields)
+            params.*(field.member) = readNumber (object, field.id, getDefaultValue (field), field.min, field.max);
+    }
 }
 
 juce::var toVar (const PresetData& preset)
@@ -115,18 +122,7 @@ juce::var toVar (const PresetData& preset)
     for (const auto& layer : preset.patch.synth)
     {
         auto* object = new juce::DynamicObject();
-
-        for (const auto& field : getSynthLayerFields())
-        {
-            const float value = layer.*(field.member);
-
-            if (field.kind == LayerField::Kind::toggle)
-                object->setProperty (field.id, value >= 0.5f);
-            else if (field.kind == LayerField::Kind::continuous)
-                object->setProperty (field.id, (double) value);
-            else
-                object->setProperty (field.id, juce::roundToInt (value));
-        }
+        writeFields (*object, layer, getSynthLayerFields());
 
         object->setProperty ("ampPoints", pointsToVar (layer.ampPoints));
         object->setProperty ("pitchPoints", pointsToVar (layer.pitchPoints));
@@ -152,18 +148,7 @@ juce::var toVar (const PresetData& preset)
     root->setProperty ("samples", samples);
 
     auto* master = new juce::DynamicObject();
-
-    for (const auto& field : getMasterFields())
-    {
-        const float value = preset.patch.master.*(field.member);
-
-        if (field.kind == MasterField::Kind::toggle)
-            master->setProperty (field.id, value >= 0.5f);
-        else if (field.kind == MasterField::Kind::continuous)
-            master->setProperty (field.id, (double) value);
-        else
-            master->setProperty (field.id, juce::roundToInt (value));
-    }
+    writeFields (*master, preset.patch.master, getMasterFields());
 
     root->setProperty ("master", juce::var (master));
     return result;
@@ -208,8 +193,7 @@ juce::Result fromVar (const juce::var& data, PresetData& preset)
             if (! object.isObject())
                 continue;
 
-            for (const auto& field : getSynthLayerFields())
-                layer.*(field.member) = readNumber (object, field.id, getDefaultValue (field), field.min, field.max);
+            readFields (object, layer, getSynthLayerFields());
 
             pointsFromVar (object["ampPoints"], layer.ampPoints);
             pointsFromVar (object["pitchPoints"], layer.pitchPoints);
@@ -226,16 +210,14 @@ juce::Result fromVar (const juce::var& data, PresetData& preset)
             if (! object.isObject())
                 continue;
 
-            for (const auto& field : getSampleLayerFields())
-                loaded.patch.samples[(size_t) i].*(field.member) = readNumber (object, field.id, getDefaultValue (field), field.min, field.max);
+            readFields (object, loaded.patch.samples[(size_t) i], getSampleLayerFields());
 
             loaded.sampleRefs[(size_t) i] = sampleRefFromVar (object["file"]);
         }
     }
 
     if (const auto& master = data["master"]; master.isObject())
-        for (const auto& field : getMasterFields())
-            loaded.patch.master.*(field.member) = readNumber (master, field.id, getDefaultValue (field), field.min, field.max);
+        readFields (master, loaded.patch.master, getMasterFields());
 
     preset = loaded;
     return juce::Result::ok();

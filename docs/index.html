@@ -113,6 +113,7 @@
   section { padding: 56px 0 8px; }
   h2 { margin: 0 0 8px; font-size: 26px; line-height: 1.4; }
   h2 + p.sub { margin: 0 0 28px; color: var(--dim); }
+  p.note { margin: 20px 0 0; color: var(--dim); font-size: 15px; }
   h3 { margin: 0 0 6px; font-size: 17px; }
 
   .grid { display: grid; gap: 16px; }
@@ -317,11 +318,12 @@
         <li><code>TAIL</code> で終わり方を選びます。<code>Strict</code> ならすぱっと無音に、<code>Natural</code> なら余韻が残ります。</li>
         <li>もっと作り込みたくなったら <code>Advanced</code> を開きます。<code>Export WAV</code> を押せば、そのままファイルに書き出せます。</li>
       </ol>
+      <p class="note">DAW を止めたままノートを動かしたときの試聴は、鍵盤を離すとすぐ止まります。最後まで聞きたいときや、鳴らしたくないときは、<code>STOPPED</code> を <code>Full</code> か <code>Off</code> に切り替えてください。再生中の鳴り方は変わりません。</p>
     </section>
 
     <section id="requirements">
       <h2>動作環境</h2>
-      <p class="sub">現在のバージョンは 0.1.2 です。</p>
+      <p class="sub">現在のバージョンは 0.1.3 です。</p>
       <div class="card table-card">
         <table>
           <tr><th>OS</th><td>macOS 12 以降</td></tr>

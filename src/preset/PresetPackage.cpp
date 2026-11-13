@@ -13,7 +13,14 @@ namespace
 
 juce::Result exportPackage (const PresetData& preset, const SampleManager& samples, const juce::File& target)
 {
-    const auto json = PresetSerializer::toJson (preset);
+    // Where the samples came from on this computer is of no use to whoever
+    // receives the package, and it would give away the user's folder names.
+    PresetData shared = preset;
+
+    for (auto& ref : shared.sampleRefs)
+        ref.originalPath.clear();
+
+    const auto json = PresetSerializer::toJson (shared);
 
     juce::ZipFile::Builder builder;
     builder.addEntry (std::make_unique<juce::MemoryInputStream> (json.toRawUTF8(), json.getNumBytesAsUTF8(), true),
@@ -80,7 +87,14 @@ juce::Result importPackage (const juce::File& package, const SampleManager& samp
         if (stream == nullptr)
             return juce::Result::fail ("The package could not be read.");
 
-        if (const auto result = PresetSerializer::fromJson (stream->readEntireStreamAsString(), loaded); result.failed())
+        // The size in the zip directory is only a claim: stop reading at the limit.
+        juce::MemoryBlock json;
+        stream->readIntoMemoryBlock (json, (ssize_t) (maxPresetBytes + 1));
+
+        if ((juce::int64) json.getSize() > maxPresetBytes)
+            return juce::Result::fail ("This is not an FXtend preset package.");
+
+        if (const auto result = PresetSerializer::fromJson (json.toString(), loaded); result.failed())
             return result;
     }
 
@@ -93,7 +107,13 @@ juce::Result importPackage (const juce::File& package, const SampleManager& samp
 
         const auto managed = samples.getManagedFile (ref);
 
-        if (managed == juce::File() || managed.getFileName() != ref.fileName || ! SampleManager::hasSupportedExtension (managed))
+        // A managed file is always named after the hash of its contents. Insist
+        // on that, or a package could store one sound under another's name.
+        const bool namedAfterContents = ref.id.length() == 64 && ref.id.containsOnly ("0123456789abcdef")
+                                        && ref.fileName.startsWith (ref.id + ".");
+
+        if (managed == juce::File() || managed.getFileName() != ref.fileName || ! namedAfterContents
+            || ! SampleManager::hasSupportedExtension (managed))
             return juce::Result::fail ("The package refers to a sample with an invalid name.");
 
         if (managed.existsAsFile())

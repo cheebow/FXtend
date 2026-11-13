@@ -1,4 +1,5 @@
 #include "TestHost.h"
+#include "dsp/TimeStretchProcessor.h"
 #include "engine/FxTemplates.h"
 
 #include <catch2/catch_approx.hpp>
@@ -242,4 +243,46 @@ TEST_CASE ("Replacing or removing a sample while it plays is safe", "[sample]")
     // 1 s of 880 Hz over 1.875 s.
     REQUIRE (fxtest::estimateFrequency (result.audio[0], 512 * 45, 512 * 95, 48000.0) == Catch::Approx (880.0 / 1.875).epsilon (0.01));
     REQUIRE (result.last < 512 * 101);
+}
+
+TEST_CASE ("A block without access to the sample audio is a gap, not the end of the layer", "[sample]")
+{
+    // The plugin hands the engine no sample audio for a block when a sample
+    // is being swapped at that very moment. The layer must carry on afterwards.
+    const auto sample = fxtest::makeSineSample (3.0, 440.0);
+    const auto* audio = sample.get();
+
+    for (const auto mode : { SampleMode::resample, SampleMode::loop, SampleMode::oneShot })
+    {
+        INFO ("mode " << (int) mode);
+
+        HostSim host;
+        host.beforeBlock = [audio] (long long position, HostSim& sim, double&)
+        {
+            const bool unavailable = position >= 59 * 512 && position < 60 * 512;
+            sim.sources[0].raw = unavailable ? nullptr : audio;
+        };
+
+        const auto result = render (samplePatch (mode), sample, 1.0, 3 * 48000, {}, host);
+
+        REQUIRE (fxtest::peakBetween (result.audio, 59 * 512 + 16, 60 * 512 - 16) == 0.0f);
+        REQUIRE (fxtest::peakBetween (result.audio, 62 * 512, 80000) == Catch::Approx (0.5f).epsilon (0.05));
+        REQUIRE (result.last < oneBar);
+    }
+}
+
+TEST_CASE ("Stretch renders are refused when they would be too short or enormous", "[sample]")
+{
+    const auto sample = fxtest::makeSineSample (3.0, 440.0);
+    auto params = samplePatch (SampleMode::stretch).samples[0];
+
+    REQUIRE (makeStretchJob (sample, params, 7.5).isValid());
+
+    // 32 bars at a crawl: minutes of audio per slot.
+    REQUIRE_FALSE (makeStretchJob (sample, params, 1500.0).isValid());
+
+    // A sliver of the body: stretchSample would not render it either.
+    params.start = 0.0f;
+    params.end = 0.02f;
+    REQUIRE_FALSE (makeStretchJob (sample, params, 0.06).isValid());
 }

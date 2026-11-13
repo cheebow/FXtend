@@ -205,6 +205,33 @@ TEST_CASE ("A preset package carries the sound and its samples to another comput
         REQUIRE (laptop.root.getChildFile ("Samples").getNumberOfChildFiles (juce::File::findFiles) == 1);
     }
 
+    SECTION ("The package does not say where the sample came from on the first computer")
+    {
+        juce::ZipFile zip (package);
+        const std::unique_ptr<juce::InputStream> stream (zip.createStreamForEntry (*zip.getEntry ("preset.json")));
+        const auto json = stream->readEntireStreamAsString();
+
+        REQUIRE (json.contains ("whoosh.wav"));
+        REQUIRE_FALSE (json.contains ("recordings"));
+        REQUIRE_FALSE (json.contains (studio.root.getFileName()));
+    }
+
+    SECTION ("Importing never replaces a preset that is already there")
+    {
+        FXtendAudioProcessor processor (laptop.root);
+        REQUIRE (processor.loadPreset (processor.getPresetManager().indexOf ("Impact 01 Deep")).wasOk());
+        REQUIRE (processor.saveUserPreset ("My FX").wasOk());
+
+        REQUIRE (processor.importPresetPackage (package).wasOk());
+        REQUIRE (processor.getCurrentPresetName() == "My FX (imported)");
+        REQUIRE (processor.importPresetPackage (package).wasOk());
+        REQUIRE (processor.getCurrentPresetName() == "My FX (imported 2)");
+
+        // The user's own "My FX" is still the impact it was.
+        REQUIRE (processor.loadPreset (processor.getPresetManager().indexOf ("My FX")).wasOk());
+        REQUIRE (processor.getCurrentPatch().fxType == FxType::impact);
+    }
+
     SECTION ("A package whose sample was altered is refused and nothing is installed")
     {
         // Rebuild the package with different audio under the same name.

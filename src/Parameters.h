@@ -19,6 +19,7 @@ namespace ParamIDs
     inline constexpr const char* lengthValue = "lengthValue";
     inline constexpr const char* tailMode = "tailMode";
     inline constexpr const char* retrigger = "retrigger";
+    inline constexpr const char* stoppedNotes = "stoppedNotes";
     inline constexpr const char* manualBpm = "manualBpm";
     inline constexpr const char* masterGain = "masterGain";
 
@@ -41,12 +42,15 @@ public:
         patch are left untouched. */
     void read (fxtend::Patch& patch, fxtend::EngineSettings& settings) const noexcept;
 
+    fxtend::TailMode readTailMode() const noexcept;
+
 private:
     std::atomic<float>* fxType = nullptr;
     std::atomic<float>* lengthUnit = nullptr;
     std::atomic<float>* lengthValue = nullptr;
     std::atomic<float>* tailMode = nullptr;
     std::atomic<float>* retrigger = nullptr;
+    std::atomic<float>* stoppedNotes = nullptr;
     std::atomic<float>* manualBpm = nullptr;
     std::atomic<float>* masterGain = nullptr;
     std::array<std::atomic<float>*, fxtend::numMacros> macros {};

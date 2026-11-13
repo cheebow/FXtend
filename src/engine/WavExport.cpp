@@ -8,8 +8,7 @@ namespace fxtend
 
 bool prepareStretchedSamples (RenderRequest& request, const std::function<bool()>& shouldAbort)
 {
-    const double bodySeconds = FxEngine::lengthInQuarterNotes (request.settings.lengthUnit, request.settings.lengthValue, request.timeSig)
-                               * 60.0 / std::max (1.0, request.bpm);
+    const double bodySeconds = getBodyLengthInSeconds (request);
 
     for (size_t slot = 0; slot < request.samples.size(); ++slot)
     {

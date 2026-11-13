@@ -60,6 +60,7 @@ private:
     double sampleRate = 44100.0;
     double manualBpm = 120.0;
     double nextPpq = 0.0;       // predicted position of the next block's first sample
+    double lastBlockQn = 0.0;   // length of the previous block, at the tempo it was given
     bool wasSynced = false;
     bool wasPlaying = false;
     bool firstBlock = true;

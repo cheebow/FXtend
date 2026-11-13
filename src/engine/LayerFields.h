@@ -49,5 +49,6 @@ inline constexpr const char* fxTypeChoices = "Impact|Riser|Downlifter|Sweep|Clap
 inline constexpr const char* lengthUnitChoices = "Bars|Beats|Quarter Notes";
 inline constexpr const char* tailModeChoices = "Strict|Natural";
 inline constexpr const char* retriggerChoices = "Restart|Overlap";
+inline constexpr const char* stoppedNotesChoices = "Full|Gate|Off";
 
 } // namespace fxtend

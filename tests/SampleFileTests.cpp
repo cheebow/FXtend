@@ -479,3 +479,36 @@ TEST_CASE ("Loading into a slot that already has a sample replaces it; a slot ca
     REQUIRE (processor.getSampleInfo (0).loaded);
     REQUIRE (playOneNote (processor, playHead, 512, 2 * 48000) < 0);
 }
+
+TEST_CASE ("An offline bounce waits for the stretch renders of the tempo it is rendered at", "[samplefile][plugin]")
+{
+    juce::ScopedJuceInitialiser_GUI gui;
+    TempStorage storage;
+    FXtendAudioProcessor processor (storage.root);
+    FakePlayHead playHead;
+
+    Patch patch;
+    patch.samples[0].levelDb = 0.0f;
+    patch.master.limiter = 0.0f;
+    processor.setCurrentPatch (patch);
+    setParameter (processor, ParamIDs::lengthValue, 4.0f);
+
+    const auto file = storage.root.getChildFile ("three seconds.wav");
+    writeSineFile (file, 3.0, 440.0);
+    REQUIRE (processor.loadSample (0, file).wasOk());
+
+    // Straight into a bounce at 100 BPM: the plugin has never seen this tempo,
+    // and nobody gives the background render time to finish.
+    playHead.bpm = 100.0;
+    processor.setNonRealtime (true);
+    const auto playback = playNote (processor, playHead, 512, 11 * 48000);
+    processor.setNonRealtime (false);
+
+    // 4 bars at 100 BPM = 9.6 s, at the sample's own pitch. Without the wait
+    // the layer would be read at variable speed and sound more than an octave low.
+    REQUIRE (processor.getSampleInfo (0).stretchReady);
+    REQUIRE (processor.getSampleInfo (0).stretchRatio == Catch::Approx (3.2));
+    REQUIRE (playback.lastAudible < 460800);
+    REQUIRE (playback.lastAudible > 460800 - 960);
+    REQUIRE (estimateFrequency (playback.left, 48000, 420000, 48000.0) == Catch::Approx (440.0).epsilon (0.005));
+}
